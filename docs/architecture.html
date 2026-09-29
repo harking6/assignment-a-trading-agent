@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>Trading Agent 项目架构图</title>
+<style>
+  :root{
+    --bg:#0f1115; --panel:#161a22; --ink:#e6e8ee; --dim:#8b93a4;
+    --done:#3dd68c; --todo:#f5a524; --line:#3a4256;
+    --blue:#4aa8ff; --purple:#b08cff; --red:#ff6b6b; --teal:#2dd4bf;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font-family:-apple-system,"PingFang SC","Microsoft YaHei",sans-serif;padding:28px}
+  h1{font-size:20px;margin:0 0 4px}
+  .sub{color:var(--dim);font-size:13px;margin-bottom:22px}
+  .canvas{display:flex;flex-direction:column;gap:22px}
+
+  /* layer card */
+  .layer{background:var(--panel);border:1px solid #232838;border-radius:14px;
+    padding:18px 20px 20px;position:relative}
+  .layer h2{font-size:13px;font-weight:600;color:var(--dim);margin:0 0 14px;
+    letter-spacing:.5px;text-transform:uppercase}
+  .layer h2 .tag{float:right;font-size:11px;color:var(--dim);text-transform:none;letter-spacing:0}
+
+  .row{display:flex;gap:14px;align-items:stretch;flex-wrap:wrap}
+
+  .node{border:1px solid #2c3346;background:#1b2030;border-radius:10px;
+    padding:11px 13px;min-width:130px;flex:1;position:relative}
+  .node .name{font-size:13px;font-weight:600}
+  .node .file{font-size:11px;color:var(--dim);font-family:ui-monospace,monospace;margin-top:2px}
+  .node .mark{position:absolute;top:8px;right:10px;font-size:9.5px;font-weight:700;
+    padding:2px 6px;border-radius:6px}
+  .done{border-color:#27543f}
+  .done .mark{background:rgba(61,214,140,.15);color:var(--done)}
+  .todo{border-color:#5a3f17}
+  .todo .mark{background:rgba(245,165,36,.15);color:var(--todo)}
+
+  /* legend */
+  .legend{display:flex;gap:18px;font-size:11.5px;color:var(--dim);margin-bottom:6px}
+  .legend span b{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:5px;vertical-align:middle}
+  .sw-done{background:var(--done)} .sw-todo{background:var(--todo)}
+
+  /* graph flow */
+  .flow{display:flex;align-items:center;flex-wrap:wrap;gap:0}
+  .flow .node{min-width:118px;text-align:center;flex:0 0 auto}
+  .arrow{color:var(--line);font-size:18px;padding:0 4px;flex:0 0 auto}
+  .branch{display:flex;flex-direction:column;gap:8px;align-items:center}
+  .cond{font-size:10px;color:var(--purple);font-style:italic;margin-bottom:-2px}
+  .arrow.down{transform:rotate(90deg);padding:4px 0}
+  .subpipe{display:flex;flex-direction:column;align-items:center;gap:6px;
+    border:1px dashed #2c3346;border-radius:12px;padding:14px 12px}
+
+  .pill{display:inline-block;font-size:10px;padding:1px 7px;border-radius:20px;
+    background:#1b2030;border:1px solid #2c3346;color:var(--dim);margin-top:4px}
+
+  code{font-family:ui-monospace,"SF Mono",monospace;font-size:11px;color:var(--blue)}
+  .grp{display:flex;gap:14px;flex-wrap:wrap}
+</style>
+</head>
+<body>
+<h1>📊 Assignment A: Trading Agent — 架构图</h1>
+<div class="sub">TradingAgents 范式 · LangGraph 编排 · 完全离线可跑 · 风控与 SimulatedBroker 为最终权威</div>
+
+<div class="legend">
+  <span><b class="sw-done"></b> 已实现</span>
+  <span><b class="sw-todo"></b> 待实现 TODO</span>
+  <span>→ 数据/控制流</span>
+</div>
+
+<div class="canvas">
+
+  <!-- ============ 数据源层 ============ -->
+  <div class="layer">
+    <h2>① 数据源层 <span class="tag">data/providers.py · ✅</span></h2>
+    <div class="grp">
+      <div class="node done"><div class="name">synthetic</div><div class="file">离线确定性</div></div>
+      <div class="node done"><div class="name">csv</div><div class="file">data/*.csv</div></div>
+      <div class="node done"><div class="name">akshare</div><div class="file">A股历史+现价</div></div>
+      <div class="node done"><div class="name">tushare</div><div class="file">需 TOKEN</div></div>
+      <div class="node done"><div class="name">yfinance</div><div class="file">美股/ETF</div></div>
+    </div>
+  </div>
+
+  <!-- ============ LangGraph 工作流 ============ -->
+  <div class="layer">
+    <h2>② LangGraph 工作流 <span class="tag">agents/graph.py · ⚠️ LG-02/03/04/05</span></h2>
+    <div class="flow">
+      <div class="node done"><div class="name">analysts</div><div class="file">4 个分析师</div><div class="mark">DONE</div></div>
+      <span class="arrow">→</span>
+      <div class="node done"><div class="name">langchain_tools</div><div class="file">3 个 @tool</div><div class="mark">LC-02</div></div>
+      <span class="arrow">→</span>
+      <div class="node done"><div class="name">research</div><div class="file">辩论 debate</div><div class="mark">DONE</div></div>
+      <span class="arrow">→</span>
+      <div class="branch">
+        <div class="cond">LG-04A 条件边</div>
+        <div class="arrow">⬇</div>
+      </div>
+    </div>
+
+    <div class="row" style="margin-top:10px;justify-content:center">
+      <div class="subpipe">
+        <div class="cond">neutral → hold 节点</div>
+        <div class="node done"><div class="name">hold</div><div class="file">维持仓位</div></div>
+      </div>
+      <span style="color:var(--dim);font-size:20px;align-self:center">⇆</span>
+      <div class="subpipe">
+        <div class="cond">directional → trader</div>
+        <div class="node done"><div class="name">trader</div><div class="file">仓位/下单</div></div>
+        <div class="arrow down">↓</div>
+        <div class="branch">
+          <div class="cond">LG-04B: 非hold+正股数</div>
+        </div>
+        <div class="arrow down">↓</div>
+        <div class="node done"><div class="name">risk_debate</div><div class="file">激/中/保守</div></div>
+        <div class="arrow down">↓</div>
+        <div class="node done"><div class="name">risk</div><div class="file">风控委员会</div></div>
+      </div>
+    </div>
+
+    <div class="row" style="margin-top:14px;justify-content:center">
+      <span class="arrow">⬇</span>
+    </div>
+    <div class="row" style="justify-content:center">
+      <div class="node done"><div class="name">portfolio</div><div class="file">组合决策 → END</div><div class="mark">DONE</div></div>
+    </div>
+    <div class="pill" style="text-align:center">MemorySaver checkpoint + JsonPlusSerializer（Pydantic）</div>
+  </div>
+
+  <!-- ============ 横向：LangChain 基础设施 ============ -->
+  <div class="layer">
+    <h2>③ LangChain 基础设施 <span class="tag">被工作流各节点调用</span></h2>
+    <div class="grp">
+      <div class="node todo"><div class="name">LLM 链</div><div class="file">llm_client.py</div><div class="mark">LC-01</div></div>
+      <div class="node todo"><div class="name">StructuredTools</div><div class="file">langchain_tools.py</div><div class="mark">LC-02</div></div>
+      <div class="node todo"><div class="name">Chat Memory</div><div class="file">memory.py</div><div class="mark">LC-03</div></div>
+      <div class="node todo"><div class="name">RAG 检索</div><div class="file">rag.py</div><div class="mark">LC-04</div></div>
+    </div>
+    <div style="margin-top:10px;font-size:11.5px;color:var(--dim)">
+      <code>ChatPromptTemplate | ChatOpenAI | JsonOutputParser</code> ·
+      <code>InMemoryChatMessageHistory</code> ·
+      <code>LexicalTradingRetriever + RunnableParallel/Lambda</code>
+    </div>
+  </div>
+
+  <!-- ============ 执行与展示层 ============ -->
+  <div class="layer">
+    <h2>④ 执行与展示层 <span class="tag">✅ 全部已实现</span></h2>
+    <div class="grp">
+      <div class="node done"><div class="name">SimulatedBroker</div><div class="file">tools/broker.py</div><div class="mark">DONE</div></div>
+      <span class="arrow">→</span>
+      <div class="node done"><div class="name">Backtest Engine</div><div class="file">engine/backtest.py</div><div class="mark">DONE</div></div>
+      <span class="arrow">→</span>
+      <div class="node done"><div class="name">HTTP API</div><div class="file">app.py :8011</div><div class="mark">DONE</div></div>
+      <span class="arrow">→</span>
+      <div class="node done"><div class="name">Browser UI</div><div class="file">index.html + app.js</div><div class="mark">DONE</div></div>
+    </div>
+  </div>
+
+  <!-- ============ 风控边界 ============ -->
+  <div class="layer">
+    <h2>⑤ 关键设计约束</h2>
+    <div class="grp" style="gap:10px">
+      <div class="pill">🔒 LLM 仅"提议"，不决策</div>
+      <div class="pill">🛡️ 风控 + Broker 为最终权威</div>
+      <div class="pill">📡 离线模式无需 key</div>
+      <div class="pill">♻️ auto 模式:有 key 才激活 LLM，失败只记 trace</div>
+      <div class="pill">📝 8 个 TODO / 6 个文件</div>
+      <div class="pill">⚠️ ASSIGNMENT.md 仓库中缺失</div>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>

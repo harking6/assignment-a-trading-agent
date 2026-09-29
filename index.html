@@ -1,0 +1,305 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>作业 A - LLM 自上而下选股 Agent</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">Assignment A · Simulated Trading Agent</p>
+          <h1>LLM 自上而下选股工作台</h1>
+          <p class="subtitle">多标模式下由 LLM 先看宏观/板块，再精选个股并分配权重。</p>
+        </div>
+        <div class="actions" aria-label="回测控制">
+          <span id="modeBadge" class="mode-badge">多标 LLM · TopDown</span>
+          <button id="resetBtn" class="button secondary" type="button">重置</button>
+          <button id="stepBtn" class="button secondary" type="button">Agent 决策一步</button>
+          <button id="runBtn" class="button primary" type="button">Agent 自动运行</button>
+          <button id="exportBtn" class="button quiet" type="button">导出报告</button>
+        </div>
+      </header>
+
+      <section class="core-config" aria-label="核心参数">
+        <label class="check-row">
+          <span>A股全市场动态选股</span>
+          <label class="inline-check">
+            <input id="dynamicUniverseInput" type="checkbox" />
+            自动获取行业与高流动性候选
+          </label>
+        </label>
+        <label>
+          <span>动态候选数量</span>
+          <input id="dynamicUniverseLimitInput" type="number" min="5" max="100" step="5" value="30" />
+        </label>
+        <label>
+          <span>多标股票池</span>
+          <input id="universeInput" type="text" value="000001,000002,600000,601012,300750" placeholder="SYM1,SYM2,SYM3" />
+        </label>
+        <label>
+          <span>模拟天数（仅离线合成行情）</span>
+          <input id="daysInput" type="number" min="5" step="1" value="20" />
+        </label>
+        <label>
+          <span>Deep LLM 模型</span>
+          <input id="deepModelInput" type="text" value="glm-5.2" />
+        </label>
+        <label>
+          <span>LLM Base URL</span>
+          <input id="llmBaseUrlInput" type="text" value="http://llmapi.bilibili.co/v1" placeholder="留空=OpenAI" />
+        </label>
+        <details class="advanced-config">
+          <summary>高级参数</summary>
+          <div class="advanced-grid">
+            <label>
+              <span>行情接口</span>
+              <select id="providerSelect">
+                <option value="akshare" selected>AkShare A股</option>
+                <option value="synthetic">离线合成行情</option>
+                <option value="csv">本地 CSV</option>
+                <option value="tushare">Tushare A股</option>
+                <option value="yfinance">yfinance 美股/ETF</option>
+              </select>
+            </label>
+            <label>
+              <span>标的代码</span>
+              <input id="symbolInput" type="text" value="000300.SH" placeholder="股票: 000001" />
+            </label>
+            <label>
+              <span>基准指数</span>
+              <input id="benchmarkInput" type="text" value="000300.SH" placeholder="上证指数: 000001.SH" />
+            </label>
+            <label>
+              <span>历史价格口径</span>
+              <select id="priceAdjustSelect">
+                <option value="qfq">前复权</option>
+                <option value="none">不复权</option>
+                <option value="hfq">后复权</option>
+              </select>
+            </label>
+            <label>
+              <span>市场样本</span>
+              <select id="datasetSelect">
+                <option value="trend">趋势上涨</option>
+                <option value="range">震荡行情</option>
+                <option value="stress">压力测试</option>
+              </select>
+            </label>
+            <label>
+              <span>Agent 委员会风格</span>
+              <select id="strategySelect">
+                <option value="multi_agent">平衡委员会</option>
+                <option value="risk">防守委员会</option>
+                <option value="aggressive">进攻委员会</option>
+              </select>
+            </label>
+            <label>
+              <span>Agent 模式</span>
+              <select id="agentModeSelect">
+                <option value="auto">Auto：有Key用LLM</option>
+                <option value="offline">Offline：本地规则</option>
+                <option value="llm" selected>LLM：强制尝试</option>
+              </select>
+            </label>
+            <label>
+              <span>Quick LLM 模型</span>
+              <input id="llmModelInput" type="text" value="glm-5.2" />
+            </label>
+            <label>
+              <span>研究辩论轮数</span>
+              <input id="debateRoundsInput" type="number" min="1" max="4" step="1" value="2" />
+            </label>
+            <label>
+              <span>风险预算</span>
+              <input id="riskInput" type="range" min="10" max="60" value="30" />
+            </label>
+            <label>
+              <span>交易成本</span>
+              <input id="feeInput" type="number" min="0" max="1" step="0.02" value="0.12" />
+            </label>
+            <label>
+              <span>最大持仓数</span>
+              <input id="maxPositionsInput" type="number" min="1" max="50" step="1" value="5" />
+            </label>
+            <label>
+              <span>Top N 板块</span>
+              <input id="topNSectorsInput" type="number" min="1" max="20" step="1" value="2" />
+            </label>
+            <label>
+              <span>每板块选股数</span>
+              <input id="stocksPerSectorInput" type="number" min="1" max="20" step="1" value="3" />
+            </label>
+            <label>
+              <span>再平衡频率(天)</span>
+              <input id="rebalanceFrequencyInput" type="number" min="1" max="60" step="1" value="5" />
+            </label>
+            <label>
+              <span>现金保留比例</span>
+              <input id="cashReserveInput" type="number" min="0" max="1" step="0.05" value="0.05" />
+            </label>
+            <label>
+              <span>最大仓位比例</span>
+              <input id="maxPositionRatioInput" type="number" min="0" max="1" step="0.05" value="0.25" />
+            </label>
+            <label>
+              <span>初始本金</span>
+              <input id="initialCashInput" type="number" min="1000" step="1000" value="100000" />
+            </label>
+            <label>
+              <span>开始日期</span>
+              <input id="startInput" type="text" value="2024-01-01" placeholder="2024-01-01" />
+            </label>
+            <label>
+              <span>结束日期</span>
+              <input id="endInput" type="text" value="2024-01-31" placeholder="2026-12-31" />
+            </label>
+            <label class="check-row">
+              <span class="inline-label">纸面单价格</span>
+              <label class="inline-check">
+                <input id="realtimeOrderInput" type="checkbox" />
+                手动订单使用实时价
+              </label>
+            </label>
+            <button id="applyAdvancedBtn" class="button secondary" type="button">应用高级参数</button>
+          </div>
+        </details>
+      </section>
+
+      <section class="metrics" aria-label="核心指标">
+        <article>
+          <span>交易日</span>
+          <strong id="dayMetric">0 / 0</strong>
+        </article>
+        <article>
+          <span>组合权益</span>
+          <strong id="equityMetric">100,000</strong>
+        </article>
+        <article>
+          <span>账户收益率</span>
+          <strong id="returnMetric">0.00%</strong>
+        </article>
+        <article>
+          <span>超额收益</span>
+          <strong id="activeMetric">0.00%</strong>
+        </article>
+        <article>
+          <span>最大回撤</span>
+          <strong id="drawdownMetric" class="risk">0.00%</strong>
+        </article>
+        <article>
+          <span>交易次数</span>
+          <strong id="tradeMetric">0</strong>
+        </article>
+      </section>
+
+      <section class="workspace">
+        <section class="hero-panel">
+          <div class="panel-title">
+            <div>
+              <h2>板块观点</h2>
+              <p>LLM 的宏观判断 → 板块选择 → 个股精选 → 权重分配。</p>
+            </div>
+            <span id="llmBadge" class="tag hold">等待运行</span>
+          </div>
+          <div id="sectorViewBox" class="hero-sector">
+            <p class="muted">点击上方“Agent 决策一步”生成 LLM 选股观点。</p>
+          </div>
+        </section>
+
+        <aside class="side">
+          <section class="agent-panel">
+            <h2>市场、权益与基准曲线</h2>
+            <canvas id="chart" width="1200" height="520" aria-label="交易回测图表"></canvas>
+            <div class="legend">
+              <span><i class="line blue"></i>价格</span>
+              <span><i class="line amber"></i>权益</span>
+              <span><i class="line green"></i>基准</span>
+            </div>
+          </section>
+
+          <section class="agent-panel">
+            <h2>当前持仓</h2>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Symbol</th>
+                    <th>Shares</th>
+                    <th>Avg Cost</th>
+                  </tr>
+                </thead>
+                <tbody id="positionsBody">
+                  <tr>
+                    <td colspan="3" class="muted">暂无持仓</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <details class="agent-panel">
+            <summary>交易日志</summary>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Day</th>
+                    <th>Symbol</th>
+                    <th>Price</th>
+                    <th>Signal</th>
+                    <th>Order</th>
+                    <th>Reason</th>
+                    <th>Fee</th>
+                    <th>Realized PnL</th>
+                    <th>Cash</th>
+                    <th>Position</th>
+                    <th>Equity</th>
+                  </tr>
+                </thead>
+                <tbody id="logBody"></tbody>
+              </table>
+            </div>
+          </details>
+
+          <details class="agent-panel">
+            <summary>手动模拟盘</summary>
+            <div class="trade-controls">
+              <label>
+                <span>委托股数</span>
+                <input id="orderSharesInput" type="number" min="1" step="100" value="100" />
+              </label>
+              <button id="buyBtn" class="button buy-action" type="button">买入</button>
+              <button id="sellBtn" class="button sell-action" type="button">卖出</button>
+              <button id="liveQuoteBtn" class="button secondary" type="button">查询市价</button>
+            </div>
+            <div class="trade-controls" style="margin-top:10px">
+              <label class="wide-control">
+                <span>目标仓位</span>
+                <input id="targetRatioInput" type="range" min="0" max="100" value="50" />
+              </label>
+              <strong id="targetRatioLabel">50%</strong>
+              <button id="rebalanceBtn" class="button secondary" type="button">调仓</button>
+              <button id="addBtn" class="button secondary" type="button">+10%</button>
+              <button id="reduceBtn" class="button secondary" type="button">-10%</button>
+            </div>
+          </details>
+
+          <details class="agent-panel">
+            <summary>Agent 工具链 trace</summary>
+            <ol id="traceList" class="trace-list"></ol>
+          </details>
+
+          <details class="agent-panel">
+            <summary>单标研究辩论</summary>
+            <div id="researchBox" class="research-box">当前为多标 TopDown 模式，研究辩论/单标决策不适用。</div>
+          </details>
+        </aside>
+      </section>
+    </main>
+
+    <script src="app.js"></script>
+  </body>
+</html>

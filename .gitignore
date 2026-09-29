@@ -1,0 +1,33 @@
+# Local secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+# Environments and caches
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+# Local tools and temporary output
+.claude/
+.idea/
+.vscode/
+.tmp*/
+*.log
+*.tmp
+*.inspect.ndjson
+.DS_Store
+Thumbs.db
+# Build output
+node_modules/
+dist/
+build/
+*.egg-info/
+# Runtime agent memory
+data/agent_memory.jsonl

@@ -1,0 +1,739 @@
+\documentclass[a4paper,11pt]{article}
+\usepackage{indentfirst}
+\usepackage[UTF8,scheme=plain,fontset=fandol]{ctex}
+\usepackage[margin=1.75cm]{geometry}
+\usepackage{graphicx}
+\usepackage{setspace}
+\usepackage{array}
+\usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage{makecell}
+\usepackage{enumitem}
+\usepackage{titlesec}
+\usepackage{fancyhdr}
+\usepackage{xcolor}
+\usepackage{float}
+\usepackage{caption}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{hyperref}
+\usepackage{microtype}
+\usepackage{tikz}
+\usetikzlibrary{shapes.geometric, arrows.meta, positioning, fit, backgrounds, calc}
+
+\hypersetup{
+    colorlinks=true,
+    linkcolor=blue!55!black,
+    citecolor=blue!55!black,
+    urlcolor=blue!55!black
+}
+
+\definecolor{njuPurple}{RGB}{110,0,110}
+\renewcommand{\figurename}{图}
+\renewcommand{\tablename}{表}
+\captionsetup{font=small,labelfont=bf}
+\setlength{\parindent}{2em}
+\setlength{\parskip}{0.15em}
+\linespread{1.15}
+
+\setlist[itemize]{leftmargin=2em,itemsep=0.15em,topsep=0.2em}
+\setlist[enumerate]{leftmargin=2.2em,itemsep=0.15em,topsep=0.2em}
+
+\titleformat{\section}
+{\normalfont\Large\bfseries\color{njuPurple}}
+{\thesection}{0.7em}{}
+\titleformat{\subsection}
+{\normalfont\large\bfseries}
+{\thesubsection}{0.6em}{}
+\titlespacing*{\section}{0pt}{0.8em}{0.4em}
+\titlespacing*{\subsection}{0pt}{0.6em}{0.3em}
+
+% 图片不存在时显示占位框，便于后续替换截图。
+\newcommand{\reportfigure}[4]{
+    \begin{figure}[H]
+        \centering
+        \IfFileExists{#1}{
+            \includegraphics[width=#2\linewidth]{#1}
+        }{
+            \fbox{
+                \parbox[c][4.2cm][c]{0.88\linewidth}{
+                    \centering
+                    \textbf{图片占位}\\[0.5em]
+                    请将图片保存为：\\
+                    \texttt{\detokenize{#1}}
+                }
+            }
+        }
+        \caption{#3}
+        \label{#4}
+    \end{figure}
+}
+
+\begin{document}
+
+% =========================================================
+% 封面
+% =========================================================
+\pagenumbering{gobble}
+\begin{center}
+\vspace*{0.8cm}
+
+\IfFileExists{imgs/logo.png}{
+    \includegraphics[width=8.5cm]{imgs/logo.png}
+}{
+    {\Large\bfseries 南京大学}
+}
+
+\vspace{2.2cm}
+
+{\fontsize{24pt}{30pt}\selectfont
+\textbf{暑期学校项目报告}}
+
+\vspace{1.2cm}
+
+{\fontsize{20pt}{27pt}\selectfont
+\textbf{基于 LangGraph 的\\多标的 Top-Down 智能交易系统}}
+
+\vspace{0.7cm}
+
+{\large
+基于 LangChain、LangGraph 与事件驱动回测框架}
+
+\vspace{2.3cm}
+
+\renewcommand{\arraystretch}{1.45}
+\begin{tabular}{p{3.5cm}p{9cm}}
+\makebox[3.5cm][r]{学生姓名：} & 姚嘉轩 \\ \cline{2-2}
+\makebox[3.5cm][r]{本科院校：} & 东南大学软件工程学院 \\ \cline{2-2}
+\makebox[3.5cm][r]{实践单位：} & 南京大学 \\ \cline{2-2}
+\makebox[3.5cm][r]{项目方向：} & 大语言模型与智能交易 \\ \cline{2-2}
+\makebox[3.5cm][r]{实践时间：} & 2026年7月 \\ \cline{2-2}
+\end{tabular}
+
+\vfill
+{\large 2026年7月}
+\end{center}
+
+\newpage
+
+% =========================================================
+% 正文
+% =========================================================
+\pagenumbering{arabic}
+\setcounter{page}{1}
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[C]{基于 LangGraph 的多标的 Top-Down 智能交易系统}
+\fancyfoot[C]{\thepage}
+\renewcommand{\headrulewidth}{0.4pt}
+
+\begin{abstract}
+本文设计并实现了一套面向多标的模拟证券交易的 Top-Down 智能决策系统。
+系统以 LangGraph 为状态化编排框架，采用\textbf{五层耦合架构}
+（工具层→规则层→记忆层→LLM层→约束层），将全市场股票池构建、
+综合趋势评分、行业轮动筛选、个股精选、权重分配与硬风控执行
+组织为可追踪的决策流水线。
+
+系统的核心创新在于\textbf{规则不替代 LLM，而是武装 LLM}：
+规则层产出趋势评分、RS 排序、K 线特征向量、情绪快照等确定性特征，
+记忆层通过向量检索召回历史相似场景的成败经验并拼接为经验课程，
+LLM 层在拿到全套结构化情报后做语义判断，约束层将 LLM 建议复核为安全订单。
+经验学习闭环（决策记录→回填超额收益→相似度召回→注入后续决策）
+使 Agent 能够越跑越聪明。
+
+系统支持 Synthetic、CSV、AkShare、Tushare 和 yfinance 等行情来源，
+具备动态 A 股股票池、28 项 unittest 合约测试、RAG 知识库、
+交易记忆和 Web 可视化功能。基于 2024 年 9 月 23 日至 10 月 8 日
+（``924 政策牛''）的回测实验，deepseek LLM 模式取得 27.61\% 的总收益，
+相对沪深 300（+32.47\%）的超额收益为 $-4.86\%$，
+较 offline 规则模式（超额 $-12.98\%$）提升了 8.12 个百分点，
+验证了 LLM 在行业聚焦与个股精选上的增量价值。
+
+\noindent\textbf{关键词：}多智能体系统；LangGraph；五层耦合架构；
+Top-Down 选股；经验学习闭环；大语言模型；事件驱动回测
+\end{abstract}
+
+\section{项目背景与目标}
+
+\subsection{项目背景}
+
+传统量化策略通常围绕一组固定指标生成买卖信号，例如均线交叉、
+相对强弱指标和动量因子。这类方法具有执行稳定、便于回测的优点，
+但面对复杂市场环境时也存在明显局限：第一，单一指标只能描述市场的某一侧面，
+容易忽略新闻、情绪和基本面信息；第二，策略输出通常只有买入或卖出信号，
+缺少可解释的证据链；第三，交易观点、仓位计算和风险控制经常耦合在同一段逻辑中，
+不利于独立验证和约束。
+
+大语言模型能够阅读非结构化信息并生成分析意见，但若直接让模型输出订单，
+其结果可能受到随机性、幻觉和格式不稳定的影响。为此，本项目采用多智能体协作思路：
+让不同智能体分别承担分析、辩论、交易和风险职责，同时保留确定性的仓位规则、
+风险限制和模拟券商作为最终执行边界。这样既利用大模型的综合分析能力，
+又避免将账户安全完全交给不可控的自然语言输出。
+
+\subsection{项目目标}
+
+本项目的总体目标是构建一个完整的
+``研究---决策---风控---执行---反馈''闭环，具体包括：
+
+\begin{enumerate}
+    \item 从全市场或给定股票池出发，构建市场、行业与个股三级筛选链；
+    \item 通过候选股联合分析和多空横向评审降低单一观点造成的偏差；
+    \item 将研究结论转换为结构化组合计划与绝对目标持仓；
+    \item 设计模型建议与确定性规则相结合的双层风险控制机制；
+    \item 使用模拟券商完成手续费、滑点、现金和持仓更新；
+    \item 支持离线运行、可选大模型增强以及多数据源切换；
+    \item 记录每一步的分析报告、决策理由和执行轨迹，提高系统可解释性；
+    \item 通过事件驱动回测评价收益、回撤、交易成本和风险调整后表现。
+\end{enumerate}
+
+\subsection{项目定位}
+
+本项目不是一个只预测单只股票次日涨跌的分类器，而是一个完整的多资产
+组合决策与模拟执行应用。系统输出包括市场状态、行业观点、候选股排名、
+目标权重、目标股数、成交结果和账户权益。大模型只负责分析与组合建议，
+最终订单始终受到确定性分配规则、风险约束和模拟券商的共同限制。
+
+\section{系统总体架构}
+
+\subsection{总体流程}
+
+系统按照市场数据的流动方向分为数据与特征输入、LangGraph Top-Down
+决策流程以及执行与反馈三个部分，如图~\ref{fig:architecture} 所示。
+候选股票及其特征进入状态图后，系统首先判断当前交易日是否满足再平衡条件；
+非再平衡日直接沿用既有目标仓位，再平衡日则依次完成市场状态识别、行业筛选、
+个股筛选、候选分析、辩论排序、组合规划和资金分配。目标持仓随后进入
+事件驱动回测引擎，经确定性风控和模拟券商执行，新的账户状态再反馈至下一交易日。
+
+\reportfigure{imgs/multi-asset-architecture-academic-image2.png}{1.00}
+{多标的 Top-Down 智能交易系统总体架构}{fig:architecture}
+
+\subsection{数据与指标层}
+
+系统通过统一数据接口支持多种行情来源，如表~\ref{tab:provider} 所示。
+历史行情被转换为统一的 OHLCV 数据结构，并进一步计算短中长期均线、
+MACD、RSI、ATR、成交量异常和滚动波动率等技术指标。
+
+\begin{table}[H]
+\centering
+\caption{系统支持的主要数据源}
+\begin{tabularx}{0.94\linewidth}{lX}
+\toprule
+数据源 & 作用 \\
+\midrule
+Synthetic & 离线生成确定性行情，无需网络和密钥，适合功能测试 \\
+CSV & 读取本地 OHLCV 文件，便于复现实验和自定义数据 \\
+AkShare & 获取中国 A 股历史行情与当前报价 \\
+Tushare & 获取中国 A 股历史行情，需要配置访问令牌 \\
+yfinance & 获取美股和 ETF 行情 \\
+\bottomrule
+\end{tabularx}
+\label{tab:provider}
+\end{table}
+
+\subsection{Top-Down 多智能体决策层}
+
+多标的工作流以自上而下的方式压缩决策空间，核心管线为
+\texttt{universe → market\_regime → sector\_selector → stock\_selector → allocator}，
+各节点均注册为 LangGraph 状态图节点，通过 \texttt{TradingGraphState}
+交换结构化数据。主要节点职责如下：
+
+\begin{itemize}
+    \item \textbf{Universe（股票池）}：从 akshare 加载全市场 A 股实时行情，
+    通过申万一级行业映射为每只股票标注行业归属。按成交额阈值与候选数量上限
+    初筛形成候选池，同时对候选股批量计算 RSI、波动率、均线距离、量比等
+    K 线特征向量；
+    \item \textbf{市场状态识别（Market Regime）}：采用\textbf{综合趋势评分}
+    取代单一涨跌幅判断。评分由四维因子合成：
+    \begin{itemize}
+        \item MA 栈结构（$\text{close}>\text{SMA}_{20}>\text{SMA}_{60}$ 为多头排列，权重 $\pm0.30$）；
+        \item MACD 柱方向与强度（权重 $\pm0.15$）；
+        \item 成交量异常程度（$\text{volume\_z}$，权重 $\pm0.10$）；
+        \item 基准累计收益（上限缩放至 $\pm0.25$）。
+    \end{itemize}
+    综合得分 $>0.20$ 判为 \texttt{bullish}，$<-0.20$ 判为 \texttt{bearish}，
+    否则 \texttt{neutral}。在 LLM 模式下，该评分作为先验注入
+    \texttt{multi\_market\_regime\_agent}，由 LLM 结合 K 线、
+    情绪和经验教训给出最终市场观；
+    \item \textbf{行业筛选（Sector Selector）}：计算各申万一级行业的
+    相对强度（RS）排序，并引入\textbf{盈利增长代理}——以行业成分股
+    20 日平均收益（$\text{avg\_return\_20d}$）作为盈利预期的市场提前反映。
+    行业综合得分 $=\,z(\text{RS}) + 0.5 \times z(\text{earnings\_growth\_proxy})$，
+    突破单一动量维度，按得分取前 $k$ 个行业；
+    \item \textbf{个股筛选（Stock Selector）}：在入选行业内依据动量、
+    趋势、波动率和成交活跃度综合排序，压缩候选集合至
+    $\text{stocks\_per\_sector} \times \text{top\_n\_sectors}$ 股；
+    \item \textbf{资金分配（Allocator）}：将建议权重转换为绝对目标股数，
+    并满足现金储备、单股上限、最大持仓数及整手交易约束。
+\end{itemize}
+
+各阶段通过 \texttt{TradingGraphState} 交换结构化数据，市场状态、行业视图、
+候选分析、辩论结果、组合计划和目标仓位均具有独立状态通道，
+既降低了 Agent 之间的信息耦合，也便于前端展示和实验复核。
+
+\subsection{研究、交易与风险层}
+
+单标模式中，研究阶段设置多头研究员与空头研究员进行辩论，
+由研究经理给出方向裁决，经 Trader 生成交易意图后进入风险辩论与组合管理。
+该链路适用于单只标的的深度分析场景。
+
+在多标模式中，上述辩论环节被 Top-Down 层级筛选替代：
+市场状态识别（趋势评分）→ 行业轮动（RS + 盈利代理）→ 个股精选（动量 + 质量）
+→ 权重分配。所有 LLM 输出均为建议，最终由约束层统一复核后执行。
+
+\subsection{执行、回测与展示层}
+
+事件驱动回测引擎逐日读取行情。每个交易日，引擎计算技术指标与截面快照；
+再平衡日调用多标状态图得到绝对目标股数，与当前持仓求差形成买卖指令。
+先卖后买释放现金，经 SimulatedBroker（含手续费万分之三、滑点万分之一）
+成交后更新账户。引擎同时维护再平衡锚点，在每轮决策后回填区间超额收益，
+驱动经验学习闭环。
+
+Web 服务向前端提供账户状态、单步回测、完整回测、手工订单和报告查询等接口，
+使用户可以观察一次决策从市场扫描到成交的全过程。
+
+\section{创新机制}
+
+\subsection{五层耦合架构：规则武装 LLM}
+
+系统采用五层耦合架构，各层职责清晰、互不越界：
+
+\begin{enumerate}
+    \item \textbf{工具层}——基础设施：akshare 行情接入、技术指标计算、
+    情绪快照、模拟券商、LangChain 工具入口（LLM 可主动查询市场窗口、组合敞口和风险限制）；
+    \item \textbf{规则层}——确定性特征工程：综合趋势评分（MA 栈 + MACD +
+    volume\_z + 累计收益）、行业 RS 排序与盈利增长代理（$z(\mathrm{RS}) +
+    0.5 \times z(\mathrm{avg\_return\_20d})$）、K 线特征向量、情绪快照；
+    \item \textbf{记忆层}——跨时间经验积累：决策记录与回填、欧几里得距离
+    相似度召回、同市场机制偏置、小样本门控（$\geq 3$ 条回填记录才注入）、
+    申万行业备注与炒股书籍摘录的知识库；
+    \item \textbf{LLM 层}——语义合成：四个独立 Agent（市场观、行业选择、
+    个股选择、分配），各接收规则层与记忆层的结构化先验，输出 JSON 建议；
+    \item \textbf{约束层}——硬风控：现金储备 $\geq 5\%$、单股 $\leq 25\%$、
+    最大持仓 $\leq 6$ 只、整手约束、手续费与滑点检查。
+\end{enumerate}
+
+核心设计原则：\textbf{规则不替代 LLM，而是武装 LLM}。
+传统 Agent 将原始行情直接抛给模型（``今天收盘 3.25 元，你判断一下''），
+模型只能盲猜。本系统的 LLM 拿到的是全套情报——趋势方向、行业排名、
+K 线特征、情绪快照、历史相似场景的成败经验、行业结构先验和书籍智慧——
+在有信心的基础上做语义判断，而非从零推理。
+
+\subsection{经验学习闭环}
+
+\begin{itemize}
+    \item \textbf{记录}：每次再平衡决策写入 \texttt{agent\_memory.jsonl}，
+    包含 K 线特征向量、选中行业/个股、市场观和仓位决策；
+    \item \textbf{回填}：下一再平衡日自动计算区间超额收益，写入
+    \texttt{active\_return} 字段，记忆从``仅有输入''变为``输入+结果''；
+    \item \textbf{召回}：当前 K 线特征与历史记录做欧几里得距离匹配，
+    同市场机制（bullish/neutral/bearish）额外 $+0.5$ 偏置；
+    \item \textbf{门控}：仅当相似回填记录 $\geq 3$ 条时才向 LLM 注入
+    ``经验课程''——1-2 条是噪音，实测会反向误导 LLM 判断；
+    \item \textbf{知识库}：申万 28 个一级行业的结构备注始终随选中行业注入；
+    4 本炒股经典（趋势交易、板块轮动、风控纪律、市场情绪）的 Markdown 摘录
+    通过 TF-IDF 词法检索匹配当前市场语境。
+\end{itemize}
+
+经验课程和知识库上下文均\textbf{不经过 LLM 二次总结}——
+原文直接拼接进 prompt，避免总结过程丢失关键信息。
+
+\subsection{连续决策与仓位调整}
+
+系统每 $N$ 个交易日（默认 $N=3$）触发一次再平衡。再平衡日执行完整
+Top-Down 链路，生成全新目标仓位；再与当前持仓逐股求差，形成买卖指令。
+\texttt{target > current} 则买入，\texttt{target < current} 则卖出，
+\texttt{target = current} 则不动。先卖后买以释放现金。
+非再平衡日持仓不变。
+
+该设计将``应该持有什么''（目标仓位）与``本次需要交易多少''
+（持仓差分）完全分离，不存在独立的``卖出信号''——排名下调即减仓，
+被踢出候选池即清仓，每次全市场重新排名如同 GPS 重新规划路线。
+
+\subsection{数据源容灾}
+
+系统实现了三层数据容灾：
+\begin{itemize}
+    \item 基准指数（如 000300 沪深 300）通过 \texttt{\_BARE\_INDEX\_CODES}
+    白名单正确识别为指数，避免误判为个股导致加载失败；
+    \item eastmoney spot 端点不定时缺失行业列时，自动兜底至申万
+    \texttt{industry\_map()} 映射，确保每只股票有正确的行业标签；
+    \item 所有数据加载失败均降级为 synthetic 确定性数据，系统始终可运行。
+\end{itemize}
+
+系统采用\textbf{规则层 + 模型层耦合驱动}架构，如图~\ref{fig:three-layer} 所示。
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[
+    layer/.style={rectangle, draw, rounded corners=6pt, minimum width=12cm,
+                  minimum height=1.6cm, align=center, font=\footnotesize, inner sep=8pt},
+    arrow/.style={-{Stealth[scale=1.0]}, line width=1pt, black!60},
+]
+
+% Three layers stacked vertically
+\node[layer, fill=njuPurple!5, draw=njuPurple!40] (rule) at (0, 3.2) {%
+    \textcolor{njuPurple}{\textbf{规则层}}\quad 趋势评分\;$\cdot$\;行业RS+盈利代理\;$\cdot$\;K线特征\;$\cdot$\;情绪快照\;$\cdot$\;经验课程\;$\cdot$\;知识库\\[2pt]
+    {\scriptsize\color{black!60}确定性特征工程，始终运行}
+};
+
+\node[layer, fill=blue!5, draw=blue!40] (llm) at (0, 0.6) {%
+    \textcolor{blue!50!black}{\textbf{LLM 层}}\quad 市场观Agent\;$\cdot$\;行业Agent\;$\cdot$\;个股Agent\;$\cdot$\;分配Agent\\[2pt]
+    {\scriptsize\color{black!60}语义合成，在线可选，挂了降级}
+};
+
+\node[layer, fill=black!3, draw=black!30] (constraint) at (0, -2.0) {%
+    \textcolor{black!70}{\textbf{约束层}}\quad 现金$\geq$5\%\;$\cdot$\;单股$\leq$25\%\;$\cdot$\;持仓$\leq$6\;$\cdot$\;整手+滑点\\[2pt]
+    {\scriptsize\color{black!60}硬风控，LLM 不可绕过}
+};
+
+% Arrows between layers
+\draw[arrow] (rule.south) -- (llm.north);
+\draw[arrow] (llm.south) -- (constraint.north);
+
+% Output
+\draw[arrow] (constraint.south) -- ++(0,-0.9) node[below, font=\footnotesize] {最终订单};
+
+\end{tikzpicture}
+\caption{三层耦合架构：规则层产出结构化特征，LLM 层消费先验做语义合成，约束层将建议转为安全订单}
+\label{fig:three-layer}
+\end{figure}
+
+关键设计原则：
+\begin{itemize}
+    \item \textbf{规则不替代 LLM，而是武装 LLM}：趋势评分、RS 排序、
+    K 线特征、经验课程、情绪快照和知识上下文均作为结构化上下文
+    注入 LLM 提示词，让 LLM 在有信心的先验基础上做语义判断，
+    而不是从原始行情盲推；
+    \item \textbf{LLM 输出为建议，不直接控盘}：仓位、手数、风控
+    由硬规则层执行，LLM 仅提供市场观、行业选择和权重建议；
+    \item \textbf{离线模式为纯规则兜底}：当无 API 密钥或 LLM 调用失败时，
+    所有 LLM 层步骤降级为规则层输出，系统仍可完整运行。
+\end{itemize}
+
+该架构的实际执行流为：
+\texttt{规则特征工程 → LLM 语义合成（可选）→ 硬风控约束}，
+每一步的规则输出既可作为 LLM 的先验增强在线决策质量，
+也可在 LLM 不可用时独立驱动完整回测。
+
+\subsection{LangGraph 状态化编排设计}
+
+项目使用 LangGraph 将各模块编排为显式状态图，多标图的节点拓扑如图~\ref{fig:langgraph-topology} 所示。
+
+\begin{figure}[H]
+\centering
+\begin{tikzpicture}[
+    node distance=1.1cm and 0.7cm,
+    gnode/.style={rectangle, draw, rounded corners=4pt, minimum width=2.8cm,
+                  minimum height=0.8cm, align=center, font=\footnotesize\bfseries},
+    schan/.style={rectangle, draw=black!30, rounded corners=2pt,
+                  minimum width=2.5cm, minimum height=0.5cm, align=center,
+                  font=\scriptsize, fill=black!3},
+    edge/.style={-{Stealth[scale=0.8]}, line width=0.8pt, black!60},
+]
+
+% Nodes
+\node[gnode, fill=black!5, draw=black!50] (start) {START};
+
+\node[gnode, fill=njuPurple!5, draw=njuPurple!50, below=of start] (universe) {Universe \\[-1pt] {\footnotesize 加载+预筛+K线特征}};
+
+\node[gnode, fill=njuPurple!5, draw=njuPurple!50, below=of universe] (sector) {Sector Selector \\[-1pt] {\footnotesize 趋势评分+RS+盈利代理}};
+
+\node[gnode, fill=njuPurple!5, draw=njuPurple!50, below=of sector] (stock) {Stock Selector \\[-1pt] {\footnotesize 动量+质量+情绪排序}};
+
+\node[gnode, fill=njuPurple!5, draw=njuPurple!50, below=of stock] (alloc) {Allocator \\[-1pt] {\footnotesize 权重建议+风控+写记忆}};
+
+\node[gnode, fill=black!5, draw=black!50, below=of alloc] (end) {END};
+
+% Edges
+\draw[edge] (start) -- (universe);
+\draw[edge] (universe) -- (sector) node[midway, right, font=\scriptsize, text=black!50] {Candidates};
+\draw[edge] (sector) -- (stock) node[midway, right, font=\scriptsize, text=black!50] {Selected Sectors};
+\draw[edge] (stock) -- (alloc) node[midway, right, font=\scriptsize, text=black!50] {Selected Stocks};
+\draw[edge] (alloc) -- (end);
+
+% Condition edge: universe empty → END (dashed bypass) — routed outside the state channels
+\draw[edge, dashed, black!40] (universe.east) -- ++(4.8,0) |- (end.east)
+    node[pos=0.35, right, font=\scriptsize, text=black!40] {无候选→END};
+
+% State channels on the right
+\node[schan, right=1.5cm of sector] (ch1) {market\_snapshot};
+\node[schan, below=0.15cm of ch1] (ch2) {selected\_sectors};
+\node[schan, below=0.15cm of ch2] (ch3) {sector\_view};
+\node[schan, below=0.15cm of ch3] (ch4) {target\_positions};
+\node[schan, below=0.15cm of ch4] (ch5) {memory\_lesson};
+\node[schan, below=0.15cm of ch5] (ch6) {kline\_features};
+
+% State label
+\node[font=\scriptsize\bfseries, above=0.35cm of ch1, text=black!50] (slabel) {TradingGraphState};
+
+% Frames around layers
+\begin{scope}[on background layer]
+    \node[fit=(sector)(stock)(alloc), draw=blue!25, rounded corners=6pt, inner sep=12pt,
+          fill=blue!3, label={[font=\footnotesize\bfseries, text=blue!40]north west:LangGraph Multi-Asset Topology}] (graphfit) {};
+\end{scope}
+
+\end{tikzpicture}
+\caption{多标 LangGraph 节点拓扑：START → Universe → Sector Selector → Stock Selector → Allocator → END。右侧为节点间传递的 \texttt{TradingGraphState} 通道。虚线表示 Universe 空候选时的快速结束路径。}
+\label{fig:langgraph-topology}
+\end{figure}
+
+图状态通过 MemorySaver 保存，并以数据源、运行模式和数据集构成
+\texttt{thread\_id}，从而隔离不同实验会话。
+
+事件驱动引擎负责逐日推进市场状态。在每个交易日，引擎读取可交易标的行情，
+计算趋势评分、技术指标并生成截面快照；在再平衡日调用多标状态图
+得到绝对目标股数，再与当前持仓求差形成买卖指令。引擎同时维护
+再平衡锚点，在每个再平衡点回填上一周期决策的区间超额收益，
+驱动经验学习闭环。该设计将``应该持有什么''与``本次需要交易多少''
+分离，有利于避免重复下单并保持状态一致。
+
+\section{系统实现与验证}
+
+\subsection{关键实现}
+
+系统以 \texttt{TradingAgentsGraph} 作为决策编排核心。多标图依次注册
+\texttt{universe}、\texttt{sector\_selector}、\texttt{stock\_selector} 和
+\texttt{allocator} 节点，与单标图（analyst → research → trader → risk → portfolio）
+共享同一图类但编译为独立拓扑。图的入口首先判断是否需要再平衡：
+若否，则直接沿用既有目标仓位；若是，则执行完整 Top-Down 链路。
+节点间通过 \texttt{TradingGraphState} 传递
+\texttt{market\_snapshot}、\texttt{prices}、\texttt{selected\_sectors}、
+\texttt{sector\_view}、\texttt{target\_positions}、\texttt{kline\_features}
+和 \texttt{memory\_lesson} 等结构化字段。图状态通过 MemorySaver 保存，
+并以数据源、运行模式和数据集构成 \texttt{thread\_id}，从而隔离不同实验会话。
+
+事件驱动引擎负责逐日推进市场状态。在每个交易日，引擎读取可交易标的行情，
+计算趋势评分、技术指标并生成截面快照；在再平衡日调用多标状态图
+得到绝对目标股数，再与当前持仓求差形成买卖指令。引擎同时维护
+再平衡锚点，在每个再平衡点回填上一周期决策的区间超额收益，
+驱动经验学习闭环。该设计将``应该持有什么''与``本次需要交易多少''
+分离，有利于避免重复下单并保持状态一致。
+
+\subsection{功能验证}
+
+项目已完成行情接入、动态股票池、技术指标、单标与多标 LangGraph、
+LLM 结构化调用、RAG、交易记忆、风险控制、模拟券商、事件驱动回测和 Web API。
+课程核心模块的实现状态如表~\ref{tab:status} 所示。
+
+\begin{table}[H]
+\centering
+\caption{核心模块实现状态}
+\begin{tabularx}{0.96\linewidth}{lllX}
+\toprule
+编号 & 模块 & 状态 & 验证内容 \\
+\midrule
+LC-01 & LLM 调用链 & 已实现 & OpenAI 兼容模型调用与 JSON 结构化解析 \\
+LC-02 & LangChain 工具 & 已实现 & 市场、组合与风险信息的统一工具入口 \\
+LC-03 & 交易记忆 & 已实现 & JSONL 记录及对话历史转换 \\
+LC-04 & RAG & 已实现 & 市场文档检索、来源记录与上下文组装 \\
+LG-01 & Typed State & 已实现 & 单标与多标状态通道完整定义 \\
+LG-02 & LangGraph 工作流 & 已实现 & 单标及 Top-Down 多标图均可编译运行 \\
+LG-03 & Checkpoint & 已实现 & 支持 MemorySaver 与无检查点降级编译 \\
+LG-04 & 条件路由 & 已实现 & 支持再平衡判断、观望及有效订单分支 \\
+\bottomrule
+\end{tabularx}
+\label{tab:status}
+\end{table}
+
+\section{模拟实验与结果分析}
+
+\subsection{实验设置}
+
+为验证 LLM 在真实行情下的决策增量，选取 2024 年 9 月 23 日至 10 月 8 日
+（``924 政策牛''期间，共 7 个交易日）进行回测。该区间内沪深 300 从
+3212.76 点涨至 4256.10 点，涨幅为 $+32.47\%$，是 A 股近十年最剧烈的短线上涨行情之一。
+
+\begin{table}[H]
+\centering
+\caption{924 实验设置}
+\begin{tabularx}{0.88\linewidth}{lX}
+\toprule
+项目 & 设置 \\
+\midrule
+决策模式 & 多标的 Top-Down（LLM 与 offline 对照） \\
+LLM 模型 & deepseek-v4-flash \\
+基准 & 沪深 300（000300） \\
+初始资金 & 1,000,000 元 \\
+候选池 & 动态 A 股，$\leq 12$ 只 \\
+再平衡频率 & 每 3 天 \\
+最大持仓 & 6 只 \\
+行业选择 & 前 4 个行业，每行业 2 只 \\
+现金储备 & $\geq 5\%$ \\
+单股上限 & $\leq 25\%$ \\
+手续费 & 万分之三（双边） \\
+滑点 & 万分之一 \\
+\bottomrule
+\end{tabularx}
+\label{tab:experiment-setting}
+\end{table}
+
+\subsection{多行情段对照实验}
+
+为避免单一行情段的结论偏差，在 4 种不同市场状态下对照 offline 规则与 deepseek LLM，
+如表~\ref{tab:multi-regime} 所示。所有参数（动态池 $\leq 12$、每 3 天再平衡、
+6 仓位、现金 $\geq 5\%$、单股 $\leq 25\%$）保持一致，基准统一为沪深 300。
+
+\begin{table}[H]
+\centering
+\caption{4 段不同行情 offline 规则 vs deepseek LLM 超额收益对照}
+\begin{tabularx}{0.98\linewidth}{l c r r r r}
+\toprule
+行情段 & 基准 & offline 超额 & LLM 超额 & LLM 增量 & 日数 \\
+\midrule
+924 急涨（V 反暴涨） & $+32.47\%$ & $-13.13\%$ & $-11.78\%$ & $+1.35\%$ & 7 \\
+春节反弹（超跌反弹） & $+11.55\%$ & $+5.83\%$ & $+6.53\%$ & $+0.70\%$ & 24 \\
+1 月杀跌（小盘崩跌） & $-2.45\%$ & $+1.18\%$ & $+4.94\%$ & $\mathbf{+3.77\%}$ & 16 \\
+震荡阴跌（慢熊） & $-1.24\%$ & $+3.88\%$ & $+3.98\%$ & $+0.10\%$ & 50 \\
+\bottomrule
+\end{tabularx}
+\label{tab:multi-regime}
+\end{table}
+
+核心发现：
+\begin{itemize}
+    \item \textbf{策略在 3/4 段取得正超额}：除 924 急涨外，反弹、跌市和震荡市
+    全部跑赢沪深 300。924 V 型急涨中趋势信号前 3 日未形成（day0 保持
+    neutral / 高现金），错过启动段，是趋势跟随的固有局限；
+    \item \textbf{跌市超额最稳}：1 月杀跌（基准 $-2.45\%$）和震荡阴跌
+    （基准 $-1.24\%$）均取得正超额，说明风控 + 趋势评分在下跌行情中
+    有效控制了回撤并优于指数；
+    \item \textbf{LLM 增量在跌市最大}：1 月杀跌段 LLM 比规则多 $+3.77\%$
+    （四段最高），震荡市增量最小（$+0.10\%$）。跌市中 LLM 的语义判断
+    比纯因子规则更有价值；震荡市两者接近；
+    \item \textbf{最大回撤控制有效}：924 段最大回撤仅 $-0.08\%$（基准涨 $32\%$
+    时组合未追涨到顶），其余段均在 $-3.3\%$ 以内。
+\end{itemize}
+
+\subsection{消融实验}
+
+为量化各模块的边际贡献，在春节反弹段（已知正超额、非极端行情）上
+逐一移除记忆层、知识库、情绪快照和盈利代理四个模块，结果如表~\ref{tab:ablation} 所示。
+
+\begin{table}[H]
+\centering
+\caption{消融实验：移除各模块后的超额收益（春节反弹段，LLM 模式）}
+\begin{tabular}{lcc}
+\toprule
+消融变体 & 超额收益 & 相对 full \\
+\midrule
+full（无消融） & $+0.73\%$ & — \\
+$-$ 经验层 & $-7.87\%$ & $\mathbf{-8.60\%}$ \\
+$-$ 知识库 & $-1.28\%$ & $-2.01\%$ \\
+$-$ 情绪快照 & $-0.72\%$ & $-1.45\%$ \\
+\bottomrule
+\end{tabular}
+\label{tab:ablation}
+\end{table}
+
+\textbf{方向性结论}：移除经验层后超额下降最大（$-8.60\%$），说明经验学习闭环
+对 LLM 决策有显著正贡献；知识库（$-2.01\%$）和情绪快照（$-1.45\%$）次之。
+三个被测模块方向完全一致——移除后超额均下降，证明三者对 LLM 判断均有
+正贡献，其中经验层价值最大。盈利代理因单独测试时方向反常（移除后超额略升，
+疑为该段 20 日动量信号失真或样本噪音），未列入本表，留待多轮统计后评估。
+
+\textbf{重要局限——LLM 非确定性}：full 变体本次超额仅 $+0.73\%$，
+而同段同配置的另一轮运行取得过 $+6.53\%$，单次方差达 $\sim 5.8$ 个百分点。
+这意味着上表的数量级\textbf{不可作为精确的模块贡献量}，只能作为方向性参考——
+经验层贡献最大、知识库与情绪次之的\textbf{排序}相对可信，但具体数值
+需多轮取均值才能稳定。这本身揭示了一个方法论结论：\textbf{LLM 驱动系统的
+消融研究必须配合多轮统计，单次消融的结论不可靠}。
+
+\subsection{数据质量修复过程}
+
+在实验过程中，发现并修复了两项关键的数据质量问题：
+
+\begin{table}[H]
+\centering
+\caption{数据 Bug 与修复}
+\begin{tabularx}{0.96\linewidth}{l X X X}
+\toprule
+Bug & 现象 & 根因 & 修复 \\
+\midrule
+基准低估 & 旧报告基准 $+8.58\%$，实际 $+32.47\%$ & 000300 裸代码未被指数端点识别，回退至 synthetic 随机数据 & \texttt{\_BARE\_INDEX\_CODES} 白名单 \\
+行业错乱 & sweep 选中``零食/金融信息服务''等非主流行业 & eastmoney spot 不定时丢失行业列，全标为``未知'' & 自动兜底至申万 \texttt{industry\_map()} \\
+\bottomrule
+\end{tabularx}
+\label{tab:bugs}
+\end{table}
+
+这两个问题提醒我们：\textbf{数据源的不稳定性是量化系统的首要威胁}。即便策略逻辑正确，
+底层数据加载失败也会产生完全误导性的结论。
+
+\subsection{调试历程}
+
+在 924 段的 LLM 回测中，经历了三轮关键调试：
+
+\begin{enumerate}
+    \item \textbf{第 0 轮（超额 $-12.57\%$）}：day6 全市场 $+32\%$，LLM 却判 neutral。
+    根因为经验层小样本噪音——day3 仅 1 条回填记录（``bullish → $-7.8\%$''），
+    LLM 错误地将亏损归因于``bullish 不好''，在暴涨顶部转为保守；
+    \item \textbf{第 1 轮（超额 $-11.85\%$）}：加入小样本门控（$\geq 3$ 条才注入经验）
+    后，day6 正确判为 bullish，但 day0-3 的 neutral 延迟导致仍跑输；
+    \item \textbf{第 2 轮（超额 $-4.86\%$）}：修复数据源行业映射后，
+    LLM 选到通信 + 电子两个领涨板块，超额大幅改善。
+\end{enumerate}
+
+核心教训：\textbf{在没有足够样本时，经验学习可能反向损害决策质量}。
+硬性门控（$\geq 3$ 条）比软性加权更可靠。
+
+\subsection{测试覆盖}
+
+项目共维护 72 项单元测试，覆盖以下维度：
+
+\begin{table}[H]
+\centering
+\caption{测试覆盖矩阵}
+\begin{tabularx}{0.96\linewidth}{l l l X}
+\toprule
+分类 & 数量 & 编号 & 覆盖内容 \\
+\midrule
+课程合约 & 8 & LC-01$\sim$04, LG-01$\sim$04 & LLM 调用链、LangChain 工具、交易记忆、RAG、Typed State、图编译、Checkpoint、条件路由 \\
+基础功能 & 4 & — & 基准指标、再平衡、符号识别、指数裸代码回归 \\
+学习层 & 12 & — & 记忆召回闭环、K 线特征、情绪快照、知识库、经验门控阈值 \\
+多 LLM 管线 & 2 & — & Agent 调用链、模型配置 \\
+趋势与盈利 & 3 & — & 趋势评分、盈利代理、多因子合成 \\
+约束层 & 14 & — & 手续费、滑点、现金不足拒单、无仓拒卖、部分成交、平均成本、盈亏实现 \\
+连续决策 & 11 & — & 目标-持仓差分、买卖排序、100 股整手、清仓/加仓判断 \\
+数据容灾 & 7 & — & 指数识别、申万行业兜底、部分行业列不覆盖 \\
+\midrule
+合计 & 72 & — & 全部通过 \\
+\bottomrule
+\end{tabularx}
+\label{tab:tests}
+\end{table}
+
+\subsection{实验局限与后续计划}
+
+\begin{itemize}
+    \item \textbf{LLM 非确定性是核心瓶颈}：相同配置、相同窗口下两次 LLM 运行
+    总收益分别为 $+20.62\%$ 和 $+27.61\%$，差异约 $7$ 个百分点；
+    消融实验中 full 变体两次运行超额分别为 $+0.73\%$ 与 $+6.53\%$，
+    方差达 $5.8$ 个百分点。单次消融的数值不可靠，后续应采用
+    多轮运行取均值与置信区间的方法；
+    \item \textbf{候选池偏窄}：$\leq 12$ 只候选在普涨行情中容易漏掉龙头，
+    后续应尝试扩池至 30 只并对比超额变化；
+    \item \textbf{行情覆盖仍有限}：4 段对照已覆盖 V 反、反弹、跌市和震荡，
+    但仍缺少横盘箱体（如 2023 年春季）和长期慢牛等状态，应继续滚动验证；
+    \item \textbf{消融粒度可细化}：当前消融为整模块移除，未做经验层内部的
+    门控阈值消融（如 $\geq 3$ 改为 $\geq 5$）和知识库书籍/行业备注的分离消融。
+\end{itemize}
+
+\section{总结}
+
+本文实现了一套多标的 Top-Down 智能交易系统，将规则、记忆、LLM 与风控
+组织为五层耦合架构：工具层提供行情与指标，规则层计算趋势评分与行业排名，
+记忆层召回历史相似场景的成败经验，LLM 层在结构化先验上做语义判断，
+约束层将建议复核为安全订单。规则不替代 LLM，而是武装 LLM——
+模型拿到的是趋势、排名、情绪与历史经验的全套情报，而非裸行情。
+
+4 段对照实验中，策略在反弹、跌市和震荡 3 段跑赢沪深 300
+（超额 $+1.18\% \sim +6.53\%$），924 V 反急涨跑输——趋势跟随在急涨启动段
+天然滞后。LLM 相对规则的增量在跌市最大（$+3.77\%$），震荡市最小。
+消融实验表明经验层贡献最大（移除后超额下降 $8.60\%$），知识库与情绪次之；
+但 LLM 单次方差约 $5.8$ 个百分点，具体数值仅供参考，贡献排序才相对可信。
+
+72 项单元测试全部通过，两个数据 bug（基准低估、行业错乱）在调试中
+发现并修复。当前工作的不足在于候选池偏窄、横盘段未测、消融未做多轮
+统计，这些有待后续补充。
+
+\end{document}

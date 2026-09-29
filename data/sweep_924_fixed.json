@@ -1,0 +1,87 @@
+[
+  {
+    "label": "offline",
+    "run": 0,
+    "total": 0.274342,
+    "bench": 0.324749,
+    "active": -0.050407,
+    "sharpe": 23.5936,
+    "maxdd": -0.000936,
+    "trades": 23,
+    "market_view": "bullish",
+    "sectors": [
+      "培训教育",
+      "乳品",
+      "零食",
+      "饮料乳品"
+    ]
+  },
+  {
+    "label": "llm",
+    "run": 1,
+    "total": 0.251978,
+    "bench": 0.324749,
+    "active": -0.072771,
+    "sharpe": 20.1382,
+    "maxdd": -0.000822,
+    "trades": 17,
+    "market_view": "bullish",
+    "sectors": [
+      "乳品",
+      "零食",
+      "饮料乳品",
+      "电动乘用车"
+    ]
+  },
+  {
+    "label": "llm",
+    "run": 2,
+    "total": 0.264007,
+    "bench": 0.324749,
+    "active": -0.060742,
+    "sharpe": 22.6467,
+    "maxdd": -0.000856,
+    "trades": 17,
+    "market_view": "bullish",
+    "sectors": [
+      "培训教育",
+      "乳品",
+      "零食",
+      "饮料乳品"
+    ]
+  },
+  {
+    "label": "llm",
+    "run": 3,
+    "total": 0.212127,
+    "bench": 0.324749,
+    "active": -0.112622,
+    "sharpe": 18.4183,
+    "maxdd": -0.000915,
+    "trades": 21,
+    "market_view": "bullish",
+    "sectors": [
+      "培训教育",
+      "乳品",
+      "电动乘用车",
+      "饮料乳品"
+    ]
+  },
+  {
+    "label": "llm",
+    "run": 4,
+    "total": 0.172337,
+    "bench": 0.324749,
+    "active": -0.152412,
+    "sharpe": 25.3044,
+    "maxdd": -0.000819,
+    "trades": 18,
+    "market_view": "bullish",
+    "sectors": [
+      "培训教育",
+      "乳品",
+      "电动乘用车",
+      "饮料乳品"
+    ]
+  }
+]

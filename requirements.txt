@@ -1,0 +1,12 @@
+pandas
+numpy
+pydantic>=2
+langgraph
+langchain
+langchain-core
+langchain-openai
+langchain-text-splitters
+openai
+yfinance
+akshare
+tushare

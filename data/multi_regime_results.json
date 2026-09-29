@@ -1,0 +1,150 @@
+[
+  {
+    "label": "924急涨",
+    "mode": "offline",
+    "start": "2024-09-23",
+    "end": "2024-10-08",
+    "total": 0.193426,
+    "bench": 0.324749,
+    "active": -0.131323,
+    "sharpe": 21.5963,
+    "maxdd": -0.000866,
+    "trades": 19,
+    "market_view": "bullish",
+    "sectors": [
+      "通信",
+      "电力设备",
+      "电子",
+      "计算机"
+    ]
+  },
+  {
+    "label": "924急涨",
+    "mode": "llm",
+    "start": "2024-09-23",
+    "end": "2024-10-08",
+    "total": 0.206941,
+    "bench": 0.324749,
+    "active": -0.117808,
+    "sharpe": 22.3609,
+    "maxdd": -0.000809,
+    "trades": 20,
+    "market_view": "bullish",
+    "sectors": [
+      "通信",
+      "电力设备",
+      "电子",
+      "计算机"
+    ]
+  },
+  {
+    "label": "春节反弹",
+    "mode": "offline",
+    "start": "2024-02-05",
+    "end": "2024-03-15",
+    "total": 0.173763,
+    "bench": 0.115475,
+    "active": 0.058288,
+    "sharpe": 6.3327,
+    "maxdd": -0.03123,
+    "trades": 50,
+    "market_view": "bullish",
+    "sectors": [
+      "电子",
+      "通信",
+      "电力设备",
+      "计算机"
+    ]
+  },
+  {
+    "label": "春节反弹",
+    "mode": "llm",
+    "start": "2024-02-05",
+    "end": "2024-03-15",
+    "total": 0.18081,
+    "bench": 0.115475,
+    "active": 0.065335,
+    "sharpe": 7.5532,
+    "maxdd": -0.023719,
+    "trades": 37,
+    "market_view": "neutral",
+    "sectors": [
+      "电子",
+      "电力设备"
+    ]
+  },
+  {
+    "label": "1月杀跌",
+    "mode": "offline",
+    "start": "2024-01-15",
+    "end": "2024-02-05",
+    "total": -0.012785,
+    "bench": -0.024536,
+    "active": 0.011751,
+    "sharpe": -1.1162,
+    "maxdd": -0.033003,
+    "trades": 31,
+    "market_view": "neutral",
+    "sectors": [
+      "电力设备",
+      "通信",
+      "电子",
+      "计算机"
+    ]
+  },
+  {
+    "label": "1月杀跌",
+    "mode": "llm",
+    "start": "2024-01-15",
+    "end": "2024-02-05",
+    "total": 0.024882,
+    "bench": -0.024536,
+    "active": 0.049418,
+    "sharpe": 3.3519,
+    "maxdd": -0.008346,
+    "trades": 27,
+    "market_view": "neutral",
+    "sectors": [
+      "电力设备",
+      "通信"
+    ]
+  },
+  {
+    "label": "震荡阴跌",
+    "mode": "offline",
+    "start": "2023-10-23",
+    "end": "2023-12-29",
+    "total": 0.026422,
+    "bench": -0.012414,
+    "active": 0.038836,
+    "sharpe": 1.4127,
+    "maxdd": -0.016325,
+    "trades": 88,
+    "market_view": "neutral",
+    "sectors": [
+      "电力设备",
+      "计算机",
+      "通信",
+      "电子"
+    ]
+  },
+  {
+    "label": "震荡阴跌",
+    "mode": "llm",
+    "start": "2023-10-23",
+    "end": "2023-12-29",
+    "total": 0.027423,
+    "bench": -0.012414,
+    "active": 0.039837,
+    "sharpe": 1.2049,
+    "maxdd": -0.015114,
+    "trades": 74,
+    "market_view": "neutral",
+    "sectors": [
+      "电力设备",
+      "计算机",
+      "通信",
+      "电子"
+    ]
+  }
+]

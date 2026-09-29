@@ -1,0 +1,75 @@
+[
+  {
+    "total": 0.122773,
+    "bench": 0.115475,
+    "active": 0.007298,
+    "sharpe": 4.5823,
+    "trades": 53,
+    "market_view": "bullish",
+    "sectors": [
+      "电子",
+      "电力设备",
+      "计算机",
+      "通信"
+    ],
+    "variant": "full (无消融)"
+  },
+  {
+    "total": 0.036811,
+    "bench": 0.115475,
+    "active": -0.078664,
+    "sharpe": 2.2296,
+    "trades": 37,
+    "market_view": "neutral",
+    "sectors": [
+      "电子",
+      "电力设备"
+    ],
+    "variant": "−经验层"
+  },
+  {
+    "total": 0.102682,
+    "bench": 0.115475,
+    "active": -0.012793,
+    "sharpe": 4.9315,
+    "trades": 48,
+    "market_view": "bullish",
+    "sectors": [
+      "电子",
+      "通信",
+      "电力设备",
+      "计算机"
+    ],
+    "variant": "−知识库"
+  },
+  {
+    "total": 0.108256,
+    "bench": 0.115475,
+    "active": -0.007219,
+    "sharpe": 4.5649,
+    "trades": 54,
+    "market_view": "bullish",
+    "sectors": [
+      "电子",
+      "电力设备",
+      "计算机",
+      "通信"
+    ],
+    "variant": "−情绪快照"
+  },
+  {
+    "total": 0.134852,
+    "bench": 0.115475,
+    "active": 0.019377,
+    "sharpe": 5.2571,
+    "trades": 45,
+    "market_view": "neutral",
+    "sectors": [
+      "电子",
+      "电力设备",
+      "通信",
+      "计算机"
+    ],
+    "variant": "−盈利代理"
+  }
+]
