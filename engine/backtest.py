@@ -9,7 +9,12 @@ from core.contracts import GraphRunner, MarketDataSource
 from core.schemas import BacktestConfig, ExecutionFill, MarketBar, OrderSide
 from core.schemas import PortfolioDecision
 from data.providers import SyntheticDataProvider, bars_to_frame, build_provider
-from data.universe import AShareUniverseProvider, UniverseProviderError
+from data.universe import UniverseProviderError
+from data.universe_service import (
+    DynamicUniverseService,
+    UniverseSnapshot,
+    UniverseSnapshotSource,
+)
 from tools.broker import SimulatedBroker
 from tools.indicators import enrich_indicators
 from tools.sizing import infer_lot_size, round_order_shares
@@ -21,6 +26,8 @@ class TradingBacktestEngine:
         config: BacktestConfig | None = None,
         provider: MarketDataSource | None = None,
         graph: GraphRunner | None = None,
+        universe_service: UniverseSnapshotSource | None = None,
+        universe_snapshot: UniverseSnapshot | None = None,
     ) -> None:
         self.config = config or BacktestConfig()
         self._provider_is_injected = provider is not None
@@ -28,6 +35,11 @@ class TradingBacktestEngine:
         if provider is not None:
             self.provider = provider
         self.graph: GraphRunner = graph if graph is not None else TradingAgentsGraph()
+        self.universe_service = (
+            universe_service if universe_service is not None else DynamicUniverseService()
+        )
+        self._injected_universe_snapshot = universe_snapshot
+        self.active_universe_snapshot: UniverseSnapshot | None = None
         self.reset(self.config)
 
     def reset(self, config: BacktestConfig | None = None) -> None:
@@ -118,131 +130,15 @@ class TradingBacktestEngine:
         return bool(self.config.dynamic_universe or self.config.universe)
 
     def _resolve_dynamic_universe(self):
-        """Build a liquid cross-sector A-share universe before loading histories."""
+        """Resolve a captured or replayed universe without mixing fetch logic into the engine."""
+        self.active_universe_snapshot = None
         if not self.config.dynamic_universe:
             return None
-        if self.config.provider != "akshare":
-            raise ValueError("A股全市场动态股票池当前仅支持 provider='akshare'")
-        try:
-            provider = AShareUniverseProvider()
-            try:
-                sectors = provider.list_sectors().sort_values("change_pct", ascending=False)
-                sector_count = max(self.config.top_n_sectors, self.config.dynamic_sector_pool)
-                frames = []
-                for sector in sectors.head(sector_count)["sector"].astype(str):
-                    stocks = provider.list_sector_stocks(sector)
-                    if not stocks.empty:
-                        frames.append(stocks)
-                if not frames:
-                    raise UniverseProviderError("industry boards returned no constituents")
-                frame = __import__("pandas").concat(frames, ignore_index=True)
-            except Exception:
-                # Eastmoney's industry-board endpoint is occasionally less
-                # stable than the full-market quote endpoint. Keep the
-                # universe dynamic by falling back to the complete spot table.
-                frame = provider.list_spot()
-                if frame.empty:
-                    raise UniverseProviderError("full-market spot table is empty")
-                frame = frame.copy()
-                # list_spot now attaches a real Shenwan industry label via
-                # industry_map(); only fall back to the coarse exchange-board
-                # grouping when the industry mapping failed entirely (every
-                # symbol unmapped), so sector-relative-strength selection still
-                # has something to work with.
-                if frame["sector"].isin(["未分类", "未知"]).all():
-                    frame["sector"] = frame.apply(
-                        lambda row: self._fallback_dynamic_sector(str(row["symbol"]), str(row.get("name", ""))),
-                        axis=1,
-                    )
-            frame = frame.drop_duplicates("symbol")
-            frame["turnover"] = __import__("pandas").to_numeric(frame["turnover"], errors="coerce").fillna(0.0)
-            frame["close"] = __import__("pandas").to_numeric(frame["close"], errors="coerce")
-            frame["volume"] = __import__("pandas").to_numeric(frame["volume"], errors="coerce").fillna(0)
-            frame = frame[
-                (frame["close"] > 0)
-                & (frame["volume"] > 0)
-                & (frame["turnover"] >= self.config.dynamic_min_turnover)
-                & ~frame["name"].astype(str).str.contains(r"ST|退", regex=True)
-            ]
-            return (
-                frame.sort_values(["turnover", "change_pct"], ascending=[False, False])
-                .head(max(5, self.config.dynamic_universe_limit))
-                .reset_index(drop=True)
-            )
-        except Exception as akshare_exc:
-            try:
-                return self._resolve_dynamic_universe_tushare()
-            except Exception as tushare_exc:
-                raise UniverseProviderError(
-                    f"动态A股股票池构建失败: akshare={akshare_exc}; tushare={tushare_exc}"
-                ) from tushare_exc
-
-    def _resolve_dynamic_universe_tushare(self):
-        """Fallback full-market snapshot using the configured Tushare token."""
-        import os
-        import pandas as pd
-        import tushare as ts  # type: ignore
-
-        token = os.getenv("TUSHARE_TOKEN")
-        if not token:
-            raise UniverseProviderError("TUSHARE_TOKEN is not configured")
-        pro = ts.pro_api(token)
-        end_date = __import__("datetime").date.today().strftime("%Y%m%d")
-        calendar = pro.trade_cal(exchange="", end_date=end_date, is_open="1", fields="cal_date", limit=1)
-        if calendar is None or calendar.empty:
-            raise UniverseProviderError("Tushare trading calendar returned no open date")
-        trade_date = str(calendar.iloc[0]["cal_date"])
-        basic = pro.stock_basic(
-            exchange="",
-            list_status="L",
-            fields="ts_code,symbol,name,industry",
-        )
-        daily = pro.daily(trade_date=trade_date, fields="ts_code,close,pct_chg,vol,amount")
-        if basic is None or daily is None or basic.empty or daily.empty:
-            raise UniverseProviderError(f"Tushare returned no full-market data for {trade_date}")
-        frame = basic.merge(daily, on="ts_code", how="inner")
-        normalized = pd.DataFrame(
-            {
-                "symbol": frame["symbol"].astype(str).str.zfill(6),
-                "name": frame["name"].astype(str),
-                "close": pd.to_numeric(frame["close"], errors="coerce"),
-                "change_pct": pd.to_numeric(frame["pct_chg"], errors="coerce").fillna(0.0),
-                "volume": pd.to_numeric(frame["vol"], errors="coerce").fillna(0.0) * 100,
-                "turnover": pd.to_numeric(frame["amount"], errors="coerce").fillna(0.0) * 1000,
-                "sector": frame["industry"].fillna("未知行业").astype(str),
-            }
-        )
-        normalized = normalized[
-            (normalized["close"] > 0)
-            & (normalized["volume"] > 0)
-            & (normalized["turnover"] >= self.config.dynamic_min_turnover)
-            & ~normalized["name"].str.contains(r"ST|退", regex=True)
-        ]
-        return (
-            normalized.sort_values(["turnover", "change_pct"], ascending=[False, False])
-            .head(max(5, self.config.dynamic_universe_limit))
-            .reset_index(drop=True)
-        )
-
-    @staticmethod
-    def _fallback_dynamic_sector(symbol: str, name: str) -> str:
-        """Coarse exchange/board grouping when industry metadata is unavailable."""
-        code = "".join(ch for ch in symbol if ch.isdigit())[:6]
-        if "银行" in name:
-            return "银行"
-        if code.startswith("688"):
-            return "科创板"
-        if code.startswith("300"):
-            return "创业板"
-        if code.startswith(("600", "601", "603", "605")):
-            return "沪市主板"
-        if code.startswith("002"):
-            return "深市中小盘"
-        if code.startswith("000"):
-            return "深市主板"
-        if code.startswith(("4", "8", "92")):
-            return "北交所"
-        return "其他A股"
+        snapshot = self._injected_universe_snapshot
+        if snapshot is None:
+            snapshot = self.universe_service.capture(self.config)
+        self.active_universe_snapshot = snapshot
+        return snapshot.to_frame()
 
     @property
     def finished(self) -> bool:
@@ -742,6 +638,11 @@ class TradingBacktestEngine:
             "blocked_orders": self.blocked_orders,
             "trade_count": len([trade for trade in self.trades if trade.side.value != "hold"]),
             "finished": self.finished,
+            "universe_snapshot": (
+                self.active_universe_snapshot.summary()
+                if self.active_universe_snapshot is not None
+                else None
+            ),
         }
 
     def symbol_buy_hold_return(self, price: float) -> float:
@@ -840,4 +741,9 @@ class TradingBacktestEngine:
             "research_log": self.research_log[-20:],
             "report": self.report(),
             "sector_view": self.last_sector_view,
+            "universe_snapshot": (
+                self.active_universe_snapshot.summary()
+                if self.active_universe_snapshot is not None
+                else None
+            ),
         }
