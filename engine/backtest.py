@@ -15,9 +15,9 @@ from data.universe_service import (
     UniverseSnapshot,
     UniverseSnapshotSource,
 )
+from engine.rebalance import plan_rebalance_orders
 from tools.broker import SimulatedBroker
 from tools.indicators import enrich_indicators
-from tools.sizing import infer_lot_size, round_order_shares
 
 
 class TradingBacktestEngine:
@@ -239,27 +239,15 @@ class TradingBacktestEngine:
                     "llm_trace": sector_view.get("llm_trace"),
                 }
             )
-            # Generate sell decisions first to free cash, then buys
-            current_symbols = set(portfolio.positions.keys()) | set(target_positions.keys())
-            for symbol in sorted(current_symbols, key=lambda s: 0 if portfolio.positions.get(s, 0) > (target_positions.get(s, 0)) else 1):
-                target = target_positions.get(symbol, 0)
-                current = portfolio.positions.get(symbol, 0)
-                if target == current:
+            decisions = plan_rebalance_orders(
+                portfolio.positions,
+                target_positions,
+                self.config,
+            )
+            for decision in decisions:
+                symbol = decision.symbol
+                if symbol is None:  # Planner always sets it; keep execution defensive.
                     continue
-                side = OrderSide.buy if target > current else OrderSide.sell
-                shares = abs(target - current)
-                shares = round_order_shares(shares, self.config, side, current)
-                if shares <= 0:
-                    continue
-                decision = PortfolioDecision(
-                    symbol=symbol,
-                    side=side,
-                    shares=shares,
-                    signal="top_down_rebalance",
-                    confidence=0.7,
-                    reason=f"top-down rebalance to {target} shares (current {current})",
-                    blocked=False,
-                )
                 sym_bar = self._bar_for_symbol(symbol, bar.day)
                 if sym_bar is None:
                     continue
