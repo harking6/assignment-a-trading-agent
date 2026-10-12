@@ -5,9 +5,10 @@ from statistics import mean, pstdev
 from typing import Any, Dict, List
 
 from agents.graph import TradingAgentsGraph
+from core.contracts import GraphRunner, MarketDataSource
 from core.schemas import BacktestConfig, ExecutionFill, MarketBar, OrderSide
 from core.schemas import PortfolioDecision
-from data.providers import MarketDataProvider, SyntheticDataProvider, bars_to_frame, build_provider
+from data.providers import SyntheticDataProvider, bars_to_frame, build_provider
 from data.universe import AShareUniverseProvider, UniverseProviderError
 from tools.broker import SimulatedBroker
 from tools.indicators import enrich_indicators
@@ -15,20 +16,29 @@ from tools.sizing import infer_lot_size, round_order_shares
 
 
 class TradingBacktestEngine:
-    def __init__(self, config: BacktestConfig | None = None, provider: MarketDataProvider | None = None) -> None:
+    def __init__(
+        self,
+        config: BacktestConfig | None = None,
+        provider: MarketDataSource | None = None,
+        graph: GraphRunner | None = None,
+    ) -> None:
         self.config = config or BacktestConfig()
-        self.provider = provider or build_provider(self.config.provider, __import__("pathlib").Path(__file__).resolve().parents[1] / "data")
-        self.graph = TradingAgentsGraph()
+        self._provider_is_injected = provider is not None
+        self.provider: MarketDataSource
+        if provider is not None:
+            self.provider = provider
+        self.graph: GraphRunner = graph if graph is not None else TradingAgentsGraph()
         self.reset(self.config)
 
     def reset(self, config: BacktestConfig | None = None) -> None:
         if config is not None:
             self.config = config
-        data_dir = __import__("pathlib").Path(__file__).resolve().parents[1] / "data"
-        if self.config.provider == "synthetic" and self.config.days:
-            self.provider = SyntheticDataProvider(total_days=self.config.days)
-        else:
-            self.provider = build_provider(self.config.provider, data_dir)
+        if not self._provider_is_injected:
+            data_dir = __import__("pathlib").Path(__file__).resolve().parents[1] / "data"
+            if self.config.provider == "synthetic" and self.config.days:
+                self.provider = SyntheticDataProvider(total_days=self.config.days)
+            else:
+                self.provider = build_provider(self.config.provider, data_dir)
         self.dynamic_universe_frame = self._resolve_dynamic_universe()
         self.effective_universe = (
             self.dynamic_universe_frame["symbol"].astype(str).tolist()
@@ -298,7 +308,7 @@ class TradingBacktestEngine:
                     eq_prev = float(prev.get("equity", portfolio.equity))
                     port_ret = portfolio.equity / eq_prev - 1.0 if eq_prev else 0.0
                     bench_ret = bench_now / bench_prev - 1.0 if bench_prev else 0.0
-                    self.graph.memory.record_outcome(int(prev["day"]), port_ret - bench_ret)
+                    self._record_multi_outcome(int(prev["day"]), port_ret - bench_ret)
                 except Exception:
                     pass
             market_snapshot = self._build_market_snapshot()
@@ -377,6 +387,19 @@ class TradingBacktestEngine:
         self.returns.append(equity / previous_equity - 1.0 if previous_equity else 0.0)
         self.day_index += 1
         return self.to_dict()
+
+    def _record_multi_outcome(self, day: int, active_return: float) -> None:
+        """Use the default graph's memory hook without requiring it from injected graphs.
+
+        Multi-symbol outcome recording predates the graph service contract and
+        lives on ``TradingAgentsGraph.memory``.  Keeping this optional preserves
+        the existing default behavior while allowing a minimal ``GraphRunner``
+        test double or alternate implementation to run without a memory object.
+        """
+        memory = getattr(self.graph, "memory", None)
+        record_outcome = getattr(memory, "record_outcome", None)
+        if callable(record_outcome):
+            record_outcome(day, active_return)
 
     def _current_prices(self) -> Dict[str, float]:
         prices: Dict[str, float] = {}
