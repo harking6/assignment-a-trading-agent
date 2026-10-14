@@ -1,5 +1,6 @@
 import sys
 import tempfile
+import os
 import types
 import unittest
 from pathlib import Path
@@ -62,6 +63,18 @@ class AssignmentContractTest(unittest.TestCase):
             result = client._complete_json_langchain("test_role", "Return a decision")
         self.assertEqual(result, {"side": "hold", "confidence": 0.7})
         self.assertEqual(client.last_runtime, "langchain-openai")
+
+    def test_llm_call_metadata_is_recorded_without_prompt_or_key(self) -> None:
+        client = LLMClient(mode="llm", quick_model="fake-model")
+        with patch.dict(os.environ, {"OPENAI_API_KEY": "test-key"}, clear=False), patch.object(
+            client, "_complete_json_langchain", return_value={"status": "ok"}
+        ):
+            result = client.complete_json("test_role", "secret prompt")
+        self.assertEqual(result, {"status": "ok"})
+        self.assertEqual(client.last_call["role"], "test_role")
+        self.assertTrue(client.last_call["success"])
+        self.assertNotIn("prompt", client.last_call)
+        self.assertNotIn("test-key", str(client.last_call))
 
     def test_lc02_tools_are_invoked_through_langchain(self) -> None:
         row = pd.Series({"close": 10.0, "sma_5": 10.5, "sma_20": 9.5, "rsi_14": 61.0, "volatility_20": 0.02})

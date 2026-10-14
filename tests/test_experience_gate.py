@@ -28,6 +28,7 @@ def _record(day, market_view, kline, active_return, sectors=None):
         "market_view": market_view,
         "kline_features": kline,
         "selected_sectors": sectors or [],
+        "target_positions": {"000001": 100},
         "active_return": active_return,
     }
 
@@ -49,7 +50,7 @@ class RecallEligibilityTest(unittest.TestCase):
         import json
         # Write a multi record with active_return=None directly (mirrors what
         # append_multi produces before record_outcome back-fills it).
-        with open(self.tmp, "a") as f:
+        with open(self.tmp, "a", encoding="utf-8") as f:
             f.write(json.dumps({"scope": "multi", "day": 0, "market_view": "bullish",
                                 "kline_features": _kline(), "selected_sectors": ["电子"],
                                 "active_return": None}) + "\n")
@@ -59,7 +60,7 @@ class RecallEligibilityTest(unittest.TestCase):
     def test_single_symbol_record_is_not_recalled(self) -> None:
         # A single-symbol record (no scope=multi) must not leak into multi recall
         import json
-        with open(self.tmp, "a") as f:
+        with open(self.tmp, "a", encoding="utf-8") as f:
             f.write(json.dumps({"symbol": "000001", "scope": None, "active_return": 0.05,
                                 "kline_features": _kline()}) + "\n")
         recalled = self.mem.recall_similar(_kline(), "bullish", limit=3)
@@ -82,7 +83,7 @@ class RecallRankingTest(unittest.TestCase):
 
     def _fill(self, records) -> None:
         import json
-        with open(self.tmp, "a") as f:
+        with open(self.tmp, "a", encoding="utf-8") as f:
             for r in records:
                 f.write(json.dumps(r, ensure_ascii=False) + "\n")
 
@@ -118,6 +119,74 @@ class RecallRankingTest(unittest.TestCase):
         recalled = self.mem.recall_similar(_kline(rsi=50), "bullish", limit=2)
         self.assertEqual(recalled[0]["day"], 2)  # RSI 50 → nearest
 
+    def test_same_regime_wins_when_numerical_distance_is_zero(self) -> None:
+        """Categorical market state must still matter on an exact feature tie."""
+        identical = _kline(rsi=50)
+        self._fill([
+            _record(1, "bearish", identical, 0.01, ["银行"]),
+            _record(2, "bullish", identical, -0.01, ["电子"]),
+        ])
+        recalled = self.mem.recall_similar(identical, "bullish", limit=2)
+        self.assertEqual(recalled[0]["market_view"], "bullish")
+
+    def test_more_recent_matching_episode_ranks_first(self) -> None:
+        kline = _kline(rsi=55)
+        older = _record(5, "bullish", kline, 0.03, ["电子"])
+        older["outcome_day"] = 8
+        recent = _record(28, "bullish", kline, -0.02, ["通信"])
+        recent["outcome_day"] = 29
+        self._fill([older, recent])
+        recalled = self.mem.recall_similar(kline, "bullish", limit=2, current_day=40)
+        self.assertEqual(recalled[0]["day"], 28)
+
+
+class QualityAndLeakageGateTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = Path(__file__).resolve().parent / "_tmp_quality.jsonl"
+        if self.tmp.exists():
+            self.tmp.unlink()
+        self.mem = TradingMemory(path=self.tmp)
+
+    def tearDown(self) -> None:
+        if self.tmp.exists():
+            self.tmp.unlink()
+
+    def _fill(self, records) -> None:
+        import json
+        with self.tmp.open("a", encoding="utf-8") as handle:
+            for record in records:
+                handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+    def test_incomplete_feature_record_is_filtered(self) -> None:
+        low_quality = _record(1, "bullish", {"market": {"avg_rsi": 55}}, 0.05)
+        complete = _record(2, "bullish", _kline(rsi=55), 0.05)
+        self._fill([low_quality, complete])
+        recalled = self.mem.recall_similar(_kline(rsi=55), "bullish", limit=3)
+        self.assertEqual([row["day"] for row in recalled], [2])
+        self.assertGreaterEqual(recalled[0]["_recall"]["quality"], 0.65)
+
+    def test_negative_complete_outcome_remains_eligible(self) -> None:
+        losing = _record(3, "bullish", _kline(rsi=55), -0.08, ["电子"])
+        self._fill([losing])
+        recalled = self.mem.recall_similar(_kline(rsi=55), "bullish")
+        self.assertEqual(len(recalled), 1)
+        self.assertAlmostEqual(recalled[0]["active_return"], -0.08)
+
+    def test_outcome_from_current_day_is_not_available_to_new_decision(self) -> None:
+        record = _record(4, "bullish", _kline(), 0.02)
+        record["outcome_day"] = 10
+        self._fill([record])
+        self.assertEqual(self.mem.recall_similar(_kline(), "bullish", current_day=10), [])
+        self.assertEqual(len(self.mem.recall_similar(_kline(), "bullish", current_day=11)), 1)
+
+    def test_effective_sample_size_detects_concentrated_recall(self) -> None:
+        records = [
+            {"_recall": {"score": 1.0}},
+            {"_recall": {"score": 0.01}},
+            {"_recall": {"score": 0.01}},
+        ]
+        self.assertLess(TradingMemory.effective_sample_size(records), 1.1)
+
 
 class GateThresholdTest(unittest.TestCase):
     """The graph-layer gate: inject lesson only when len(recalled) >= 3.
@@ -146,7 +215,7 @@ class GateThresholdTest(unittest.TestCase):
     def test_two_records_do_not_trigger_injection(self) -> None:
         import json
         for i in range(2):
-            with open(self.tmp, "a") as f:
+            with open(self.tmp, "a", encoding="utf-8") as f:
                 f.write(json.dumps(_record(i, "bullish", _kline(), 0.05)) + "\n")
         recalled = self.mem.recall_similar(_kline(), "bullish", limit=3)
         self.assertEqual(len(recalled), 2)
@@ -156,7 +225,7 @@ class GateThresholdTest(unittest.TestCase):
     def test_three_records_trigger_injection(self) -> None:
         import json
         for i in range(3):
-            with open(self.tmp, "a") as f:
+            with open(self.tmp, "a", encoding="utf-8") as f:
                 f.write(json.dumps(_record(i, "bullish", _kline(), 0.05 * (i + 1))) + "\n")
         recalled = self.mem.recall_similar(_kline(), "bullish", limit=3)
         self.assertEqual(len(recalled), 3)
@@ -171,7 +240,7 @@ class GateThresholdTest(unittest.TestCase):
         records = [_record(0, "bullish", _kline(), 0.082, ["电子"])]
         records.append(_record(1, "bullish", _kline(), -0.064, ["通信"]))
         records.append(_record(2, "bullish", _kline(), 0.031, ["电力设备"]))
-        with open(self.tmp, "a") as f:
+        with open(self.tmp, "a", encoding="utf-8") as f:
             for r in records:
                 f.write(json.dumps(r, ensure_ascii=False) + "\n")
         recalled = self.mem.recall_similar(_kline(), "bullish", limit=3)

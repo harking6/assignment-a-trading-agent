@@ -85,6 +85,18 @@ class _RecordingMemory:
         self.outcome_calls.append((day, active_return))
 
 
+class _LearningMemory:
+    def __init__(self) -> None:
+        self.outcome_calls = []
+        self.execution_calls = []
+
+    def record_outcome(self, day, active_return, *, outcome_day=None, holding_days=None) -> None:
+        self.outcome_calls.append((day, active_return, outcome_day, holding_days))
+
+    def record_execution(self, day, execution) -> None:
+        self.execution_calls.append((day, execution))
+
+
 def _hold_result() -> GraphResult:
     report = AnalystReport(
         agent="injected_test_analyst",
@@ -227,6 +239,28 @@ class EngineDependencyInjectionTest(unittest.TestCase):
         self.assertEqual(len(graph.memory.outcome_calls), 1)
         self.assertEqual(graph.memory.outcome_calls[0][0], 0)
         self.assertIsInstance(graph.memory.outcome_calls[0][1], float)
+
+    def test_multi_learning_hooks_preserve_execution_and_holding_metadata(self) -> None:
+        provider = _RecordingProvider()
+        graph = _RecordingGraph()
+        graph.memory = _LearningMemory()
+        config = self._config(
+            symbol="BENCH",
+            universe=["AAA"],
+            rebalance_frequency=1,
+        )
+        engine = TradingBacktestEngine(config, provider=provider, graph=graph)
+
+        engine.step()
+        engine.step()
+
+        self.assertEqual(graph.memory.outcome_calls[0][0], 0)
+        self.assertEqual(graph.memory.outcome_calls[0][2:], (1, 1))
+        self.assertEqual(graph.memory.execution_calls[0], (0, {
+            "attempted_orders": 0,
+            "filled_orders": 0,
+            "blocked_orders": 0,
+        }))
 
 
 if __name__ == "__main__":

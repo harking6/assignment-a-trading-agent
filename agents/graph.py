@@ -176,6 +176,11 @@ class TradingAgentsGraph:
                 "Multi-symbol agent_mode='llm' requires OPENAI_API_KEY; "
                 "use agent_mode='offline' only when an explicit rule-only run is intended."
             )
+        # Keep observability per rebalance. Without this reset, a later
+        # decision's trace would misleadingly include stale role calls.
+        if hasattr(self.top_down.llm, "reset_observability"):
+            self.top_down.llm.reset_observability()
+        self.top_down._llm_stage_errors = []
         if self._compiled_multi is None:
             assignment_todo(
                 "LG-MULTI",
@@ -678,16 +683,28 @@ class TradingAgentsGraph:
         # LLM decides without any recalled historical outcomes.
         if not os.environ.get("ABLATE_EXPERIENCE"):
             try:
-                recalled = self.memory.recall_similar(kline_features, market_view, limit=3)
-                # Gate experience injection behind a minimum sample: with 1-2
-                # back-filled records the "lesson" is noise (e.g. a single late
-                # bullish entry that underperformed reads as "bullish is bad" and
-                # spooks the LLM into neutral right at a melt-up top). Only inject
-                # once there are enough learned outcomes for the pattern to be
-                # meaningful. The graph still WRITES every decision to memory
-                # regardless, so the sample accumulates.
-                if len(recalled) >= 3:
+                recalled = self.memory.recall_similar(
+                    kline_features,
+                    market_view,
+                    limit=3,
+                    current_day=int(state.get("day", 0)),
+                )
+                # A count alone is not enough: three records dominated by one
+                # nearly identical episode are still one weak piece of evidence.
+                # Inject only when there are three qualified samples and their
+                # score concentration yields at least two effective samples.
+                effective_n = self.memory.effective_sample_size(recalled)
+                recall_mode = os.environ.get("MEMORY_RECALL_MODE", "full").lower()
+                need_effective_n = recall_mode == "full"
+                if len(recalled) >= 3 and (not need_effective_n or effective_n >= 2.0):
                     lesson = self.memory.to_lesson(recalled)
+                state.setdefault("trace", []).append(
+                    {
+                        "tool": "memory_recall",
+                        "detail": f"mode={recall_mode}, eligible={len(recalled)}, "
+                        f"Neff={effective_n:.2f}, injected={bool(lesson)}",
+                    }
+                )
             except Exception as exc:
                 lesson = ""
                 state.setdefault("trace", []).append({"tool": "memory_recall", "detail": f"failed: {exc}"})

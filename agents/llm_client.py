@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import os
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
+import time
 from typing import Any, Dict, Optional
 
 from langchain_core.output_parsers import JsonOutputParser
@@ -36,6 +36,8 @@ class LLMClient:
         self.base_url = (base_url or os.getenv("OPENAI_BASE_URL") or "").strip() or None
         self.last_error: str | None = None
         self.last_runtime: str = "offline"
+        self.last_call: Dict[str, Any] = {}
+        self.call_history: list[Dict[str, Any]] = []
 
     @staticmethod
     def _resolve_model(value: str | None, env_name: str, fallback: str) -> str:
@@ -52,58 +54,126 @@ class LLMClient:
             return False
         return bool(os.getenv("OPENAI_API_KEY"))
 
+    @staticmethod
+    def _http_client(timeout: float):
+        """Build a synchronous client without inheriting host network settings.
+
+        Some Windows Python/OpenSSL environments terminate the TLS handshake
+        when httpx inherits the process environment, even when no explicit
+        proxy variable is visible.  The DashScope OpenAI-compatible endpoint
+        is reachable with normal certificate verification when ``trust_env``
+        is disabled.  A deployment that deliberately relies on an HTTP proxy
+        can opt back in with ``OPENAI_TRUST_ENV=true``.
+        """
+        import httpx
+
+        trust_env = os.getenv("OPENAI_TRUST_ENV", "false").strip().lower() in {"1", "true", "yes", "on"}
+        request_timeout = httpx.Timeout(
+            timeout,
+            connect=min(10.0, timeout),
+            read=timeout,
+            write=timeout,
+            pool=min(10.0, timeout),
+        )
+        return httpx.Client(timeout=request_timeout, trust_env=trust_env)
+
+    def reset_observability(self) -> None:
+        """Start a new per-rebalance trace without retaining earlier calls."""
+        self.last_call = {}
+        self.call_history = []
+
+    def _record_call(self, role: str, model: str, deep: bool, started_at: float, success: bool) -> None:
+        """Store bounded, secret-free call metadata for the UI and backtest trace."""
+        detail = {
+            "role": role,
+            "model": model,
+            "deep": deep,
+            "runtime": self.last_runtime,
+            "success": success,
+            "elapsed_seconds": round(time.perf_counter() - started_at, 3),
+            "error": self.last_error,
+        }
+        self.last_call = detail
+        self.call_history.append(detail)
+        self.call_history = self.call_history[-20:]
+
+    def _extra_body(self) -> Dict[str, Any] | None:
+        """Apply provider-specific structured-output settings when requested.
+
+        Qwen3.7 is a hybrid thinking model. For short JSON control messages,
+        allowing the default thinking mode can consume the entire output budget
+        before any parseable JSON is emitted. DashScope supports disabling it
+        through the OpenAI-compatible ``extra_body`` payload. Other providers
+        keep their existing behavior unless the setting is explicitly supplied.
+        """
+        raw_value = os.getenv("OPENAI_ENABLE_THINKING")
+        is_dashscope = bool(self.base_url and "dashscope.aliyuncs.com" in self.base_url)
+        if raw_value is None and not is_dashscope:
+            return None
+        enabled = raw_value.strip().lower() in {"1", "true", "yes", "on"} if raw_value is not None else False
+        return {"enable_thinking": enabled}
+
     def complete_json(self, role: str, prompt: str, deep: bool = False) -> Optional[Dict[str, Any]]:
+        model_name = self.deep_model if deep else self.quick_model
+        started_at = time.perf_counter()
         if not self.enabled:
             self.last_runtime = "offline"
+            self.last_error = None
+            self._record_call(role, model_name, deep, started_at, success=False)
             return None
         result = self._complete_json_langchain(role, prompt, deep)
         if result is not None:
+            self._record_call(role, model_name, deep, started_at, success=True)
             return result
-        # If langchain already hit the thread-level timeout bound above, the
-        # endpoint is suspect — don't retry via the SDK (same endpoint, same
-        # likely hang). Only fall back to the SDK for genuine API errors.
-        if self.last_runtime == "langchain-timeout":
+        # A timeout against the primary client is not retried through the same
+        # endpoint: doing so doubles cost and makes a rebalance appear stuck.
+        if self.last_runtime in {"langchain-timeout", "langchain-truncated"}:
+            self._record_call(role, model_name, deep, started_at, success=False)
             return None
         fallback_error = self.last_error
         try:
             from openai import OpenAI  # type: ignore
 
-            kwargs: Dict[str, Any] = {}
+            timeout = float(os.getenv("OPENAI_TIMEOUT", "60"))
+            max_tokens = int(os.getenv("OPENAI_MAX_TOKENS", "800"))
+            kwargs: Dict[str, Any] = {
+                "api_key": os.getenv("OPENAI_API_KEY"),
+                "max_retries": 0,
+            }
             if self.base_url:
                 kwargs["base_url"] = self.base_url
-            timeout = float(os.getenv("OPENAI_TIMEOUT", "60"))
-            client = OpenAI(**kwargs)
-            create_call = lambda: client.chat.completions.create(
-                model=self.deep_model if deep else self.quick_model,
-                response_format={"type": "json_object"},
-                messages=[
-                    {
-                        "role": "system",
-                        "content": (
-                            "You are a financial trading agent role. Return strict JSON only. "
-                            "Never claim real execution; decisions are for a paper trading simulator."
-                        ),
-                    },
-                    {"role": "user", "content": f"Role: {role}\n\n{prompt}"},
-                ],
-                temperature=0.2,
-                timeout=timeout,
-            )
-            with ThreadPoolExecutor(max_workers=1) as pool:
-                future = pool.submit(create_call)
-                try:
-                    response = future.result(timeout=timeout)
-                except FuturesTimeoutError:
-                    self.last_error = f"{fallback_error}; fallback=sdk timed out after {timeout}s" if fallback_error else f"sdk timed out after {timeout}s"
-                    self.last_runtime = "openai-sdk-timeout"
-                    return None
+            with self._http_client(timeout) as http_client:
+                kwargs["http_client"] = http_client
+                client = OpenAI(**kwargs)
+                create_call = lambda: client.chat.completions.create(
+                    model=self.deep_model if deep else self.quick_model,
+                    response_format={"type": "json_object"},
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": (
+                                "You are a financial trading agent role. Return strict JSON only. "
+                                "Never claim real execution; decisions are for a paper trading simulator."
+                            ),
+                        },
+                        {"role": "user", "content": f"Role: {role}\n\n{prompt}"},
+                    ],
+                    temperature=0.2,
+                    max_tokens=max_tokens,
+                    extra_body=self._extra_body(),
+                    timeout=timeout,
+                )
+                response = create_call()
             content = response.choices[0].message.content or "{}"
             parsed = json.loads(content)
             self.last_error = None
             self.last_runtime = "openai-sdk-fallback"
+            self._record_call(role, model_name, deep, started_at, success=True)
             return parsed if isinstance(parsed, dict) else None
         except Exception as exc:
             self.last_error = f"{fallback_error}; fallback={exc}" if fallback_error else str(exc)
+            self.last_runtime = "openai-sdk-timeout" if _is_timeout_error(exc) else "openai-sdk-failed"
+            self._record_call(role, model_name, deep, started_at, success=False)
             return None
 
     def _complete_json_langchain(self, role: str, prompt: str, deep: bool = False) -> Optional[Dict[str, Any]]:
@@ -124,59 +194,74 @@ class LLMClient:
         api_key = os.getenv("OPENAI_API_KEY")
         model_name = self.deep_model if deep else self.quick_model
         timeout = float(os.getenv("OPENAI_TIMEOUT", "60"))
+        max_tokens = int(os.getenv("OPENAI_MAX_TOKENS", "800"))
         model_kwargs: Dict[str, Any] = {
             "model": model_name,
             "api_key": api_key,
             "temperature": 0.2,
             "timeout": timeout,
+            "max_tokens": max_tokens,
+            "max_retries": 0,
             "model_kwargs": {"response_format": {"type": "json_object"}},
         }
         if self.base_url:
             model_kwargs["base_url"] = self.base_url
+        extra_body = self._extra_body()
+        if extra_body:
+            model_kwargs["extra_body"] = extra_body
 
         try:
-            model = ChatOpenAI(**model_kwargs)
-            parser = JsonOutputParser()
-            template = ChatPromptTemplate.from_messages(
-                [
-                    (
-                        "system",
-                        "You are a financial trading agent role in a paper-trading simulator. "
-                        "Return strict JSON only. Never claim real execution; all decisions are simulated.",
-                    ),
-                    (
-                        "human",
-                        "Role: {role}\n\n{prompt}\n\n{format_instructions}",
-                    ),
-                ]
-            )
-            chain = template | model | parser
-            invoke_input = {
-                "role": role,
-                "prompt": prompt,
-                "format_instructions": parser.get_format_instructions(),
-            }
-            # Wrap chain.invoke in a hard thread timeout: langchain's `timeout`
-            # kwarg is not always honoured by the underlying httpx client
-            # (observed hanging indefinitely against some OpenAI-compatible
-            # gateways). A thread-level bound guarantees one stuck call can
-            # never freeze the whole backtest — on expiry we degrade to the
-            # rule-based fallback, same as any other LLM failure.
-            with ThreadPoolExecutor(max_workers=1) as pool:
-                future = pool.submit(chain.invoke, invoke_input)
-                try:
-                    result = future.result(timeout=timeout)
-                except FuturesTimeoutError:
-                    self.last_error = f"langchain timed out after {timeout}s"
-                    self.last_runtime = "langchain-timeout"
-                    return None
+            with self._http_client(timeout) as http_client:
+                model_kwargs["http_client"] = http_client
+                model = ChatOpenAI(**model_kwargs)
+                parser = JsonOutputParser()
+                template = ChatPromptTemplate.from_messages(
+                    [
+                        (
+                            "system",
+                            "You are a financial trading agent role in a paper-trading simulator. "
+                            "Return strict JSON only. Never claim real execution; all decisions are simulated.",
+                        ),
+                        (
+                            "human",
+                            "Role: {role}\n\n{prompt}\n\n{format_instructions}",
+                        ),
+                    ]
+                )
+                chain = template | model | parser
+                invoke_input = {
+                    "role": role,
+                    "prompt": prompt,
+                    "format_instructions": parser.get_format_instructions(),
+                }
+                # httpx owns the timeout, so the request is cancelled at the
+                # transport boundary rather than leaving an unkillable worker
+                # thread behind after a Python-level timeout.
+                result = chain.invoke(invoke_input)
             self.last_runtime = "langchain-openai"
             self.last_error = None
             return result if isinstance(result, dict) else None
         except Exception as exc:
             self.last_error = f"langchain completion failed: {exc}"
-            self.last_runtime = "langchain-failed"
+            if _is_timeout_error(exc):
+                self.last_runtime = "langchain-timeout"
+            elif _is_length_limit_error(exc):
+                self.last_runtime = "langchain-truncated"
+            else:
+                self.last_runtime = "langchain-failed"
             return None
+
+
+def _is_timeout_error(exc: Exception) -> bool:
+    """Recognise httpx/OpenAI timeout wrappers without importing either eagerly."""
+    name = type(exc).__name__.lower()
+    text = str(exc).lower()
+    return "timeout" in name or "timed out" in text or "readtimeout" in text
+
+
+def _is_length_limit_error(exc: Exception) -> bool:
+    text = str(exc).lower()
+    return "length limit" in text or "finish_reason" in text and "length" in text
 
 
 def clamp_float(value: object, low: float = -1.0, high: float = 1.0, default: float = 0.0) -> float:

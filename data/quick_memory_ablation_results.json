@@ -1,0 +1,207 @@
+{
+  "runs": [
+    {
+      "regime": "短窗连通验证",
+      "variant": "A 无经验",
+      "recall_mode": "none",
+      "repeat": 0,
+      "warmup": {
+        "start": "2024-01-22",
+        "end": "2024-02-05"
+      },
+      "test": {
+        "start": "2024-02-05",
+        "end": "2024-02-16"
+      },
+      "total_return": 0.06663,
+      "benchmark_return": 0.051403,
+      "active_return": 0.015227,
+      "sharpe": 15.2453,
+      "max_drawdown": -0.000739,
+      "turnover": 1307161.2084,
+      "trade_count": 5,
+      "memory_trace": []
+    },
+    {
+      "regime": "短窗连通验证",
+      "variant": "B 现有基线",
+      "recall_mode": "legacy",
+      "repeat": 0,
+      "warmup": {
+        "start": "2024-01-22",
+        "end": "2024-02-05"
+      },
+      "test": {
+        "start": "2024-02-05",
+        "end": "2024-02-16"
+      },
+      "total_return": 0.066869,
+      "benchmark_return": 0.051403,
+      "active_return": 0.015466,
+      "sharpe": 15.3462,
+      "max_drawdown": -0.000682,
+      "turnover": 1136380.3714,
+      "trade_count": 5,
+      "memory_trace": [
+        {
+          "tool": "memory_recall",
+          "detail": "mode=legacy, eligible=3, Neff=2.79, injected=True"
+        },
+        {
+          "tool": "memory_recall",
+          "detail": "mode=legacy, eligible=3, Neff=2.83, injected=True"
+        }
+      ]
+    },
+    {
+      "regime": "短窗连通验证",
+      "variant": "C 质量门控",
+      "recall_mode": "quality",
+      "repeat": 0,
+      "warmup": {
+        "start": "2024-01-22",
+        "end": "2024-02-05"
+      },
+      "test": {
+        "start": "2024-02-05",
+        "end": "2024-02-16"
+      },
+      "total_return": 0.066658,
+      "benchmark_return": 0.051403,
+      "active_return": 0.015255,
+      "sharpe": 15.2572,
+      "max_drawdown": -0.000712,
+      "turnover": 1286990.2434,
+      "trade_count": 5,
+      "memory_trace": [
+        {
+          "tool": "memory_recall",
+          "detail": "mode=quality, eligible=3, Neff=1.41, injected=True"
+        },
+        {
+          "tool": "memory_recall",
+          "detail": "mode=quality, eligible=3, Neff=1.35, injected=True"
+        }
+      ]
+    },
+    {
+      "regime": "短窗连通验证",
+      "variant": "D 质量加时效",
+      "recall_mode": "quality_recency",
+      "repeat": 0,
+      "warmup": {
+        "start": "2024-01-22",
+        "end": "2024-02-05"
+      },
+      "test": {
+        "start": "2024-02-05",
+        "end": "2024-02-16"
+      },
+      "total_return": 0.081452,
+      "benchmark_return": 0.051403,
+      "active_return": 0.030049,
+      "sharpe": 13.7543,
+      "max_drawdown": -0.000735,
+      "turnover": 1345957.3128,
+      "trade_count": 5,
+      "memory_trace": [
+        {
+          "tool": "memory_recall",
+          "detail": "mode=quality_recency, eligible=3, Neff=1.50, injected=True"
+        },
+        {
+          "tool": "memory_recall",
+          "detail": "mode=quality_recency, eligible=3, Neff=1.34, injected=True"
+        }
+      ]
+    },
+    {
+      "regime": "短窗连通验证",
+      "variant": "E 完整方案",
+      "recall_mode": "full",
+      "repeat": 0,
+      "warmup": {
+        "start": "2024-01-22",
+        "end": "2024-02-05"
+      },
+      "test": {
+        "start": "2024-02-05",
+        "end": "2024-02-16"
+      },
+      "total_return": 0.081687,
+      "benchmark_return": 0.051403,
+      "active_return": 0.030284,
+      "sharpe": 13.8204,
+      "max_drawdown": -0.000695,
+      "turnover": 1177865.9378,
+      "trade_count": 5,
+      "memory_trace": [
+        {
+          "tool": "memory_recall",
+          "detail": "mode=full, eligible=3, Neff=1.50, injected=False"
+        },
+        {
+          "tool": "memory_recall",
+          "detail": "mode=full, eligible=3, Neff=1.34, injected=False"
+        }
+      ]
+    }
+  ],
+  "summary": [
+    {
+      "regime": "短窗连通验证",
+      "variant": "A 无经验",
+      "runs": 1,
+      "median_active_return": 0.015227,
+      "min_active_return": 0.015227,
+      "max_active_return": 0.015227,
+      "median_sharpe": 15.2453,
+      "median_max_drawdown": -0.000739,
+      "median_turnover": 1307161.2084
+    },
+    {
+      "regime": "短窗连通验证",
+      "variant": "B 现有基线",
+      "runs": 1,
+      "median_active_return": 0.015466,
+      "min_active_return": 0.015466,
+      "max_active_return": 0.015466,
+      "median_sharpe": 15.3462,
+      "median_max_drawdown": -0.000682,
+      "median_turnover": 1136380.3714
+    },
+    {
+      "regime": "短窗连通验证",
+      "variant": "C 质量门控",
+      "runs": 1,
+      "median_active_return": 0.015255,
+      "min_active_return": 0.015255,
+      "max_active_return": 0.015255,
+      "median_sharpe": 15.2572,
+      "median_max_drawdown": -0.000712,
+      "median_turnover": 1286990.2434
+    },
+    {
+      "regime": "短窗连通验证",
+      "variant": "D 质量加时效",
+      "runs": 1,
+      "median_active_return": 0.030049,
+      "min_active_return": 0.030049,
+      "max_active_return": 0.030049,
+      "median_sharpe": 13.7543,
+      "median_max_drawdown": -0.000735,
+      "median_turnover": 1345957.3128
+    },
+    {
+      "regime": "短窗连通验证",
+      "variant": "E 完整方案",
+      "runs": 1,
+      "median_active_return": 0.030284,
+      "min_active_return": 0.030284,
+      "max_active_return": 0.030284,
+      "median_sharpe": 13.8204,
+      "median_max_drawdown": -0.000695,
+      "median_turnover": 1177865.9378
+    }
+  ]
+}

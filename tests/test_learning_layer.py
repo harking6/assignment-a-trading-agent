@@ -100,6 +100,15 @@ class MemoryRecallLoopTest(unittest.TestCase):
         recalled = self.memory.recall_similar({"market": {"avg_rsi": 50, "avg_volatility": 0.2, "breadth_up": 0.5, "avg_dist_sma20": 0.0}}, "bullish")
         self.assertAlmostEqual(recalled[0]["active_return"], 0.021)
 
+    def test_execution_and_outcome_metadata_are_persisted(self) -> None:
+        self.memory.append(_multi_record(1, rsi=50, vol=0.2, breadth=0.5, dist=0.0, market_view="bullish", sectors=["电子"], active=None))
+        self.memory.record_execution(1, {"attempted_orders": 2, "filled_orders": 2, "blocked_orders": 0})
+        self.memory.record_outcome(1, 0.021, outcome_day=6, holding_days=5)
+        row = self.memory._read_all()[0]
+        self.assertEqual(row["execution"]["filled_orders"], 2)
+        self.assertEqual(row["outcome_day"], 6)
+        self.assertEqual(row["holding_days"], 5)
+
 
 class KlineFeaturesTest(unittest.TestCase):
     def test_market_features_aggregate(self) -> None:
