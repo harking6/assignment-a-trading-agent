@@ -877,4 +877,6 @@ class TopDownSelector:
             "runtime": self.llm.last_runtime,
             "error": self.llm.last_error,
             "stage": "sector+stock",
+            "calls": list(getattr(self.llm, "call_history", [])),
+            "stage_errors": list(getattr(self, "_llm_stage_errors", [])),
         }

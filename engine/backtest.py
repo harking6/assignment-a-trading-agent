@@ -204,7 +204,12 @@ class TradingBacktestEngine:
                     eq_prev = float(prev.get("equity", portfolio.equity))
                     port_ret = portfolio.equity / eq_prev - 1.0 if eq_prev else 0.0
                     bench_ret = bench_now / bench_prev - 1.0 if bench_prev else 0.0
-                    self._record_multi_outcome(int(prev["day"]), port_ret - bench_ret)
+                    self._record_multi_outcome(
+                        int(prev["day"]),
+                        port_ret - bench_ret,
+                        outcome_day=self.day_index,
+                        holding_days=self.day_index - int(prev["day"]),
+                    )
                 except Exception:
                     pass
             market_snapshot = self._build_market_snapshot()
@@ -258,6 +263,14 @@ class TradingBacktestEngine:
                     self.blocked_orders += 1
                 # Refresh portfolio snapshot after each fill for conservative cash accounting
                 portfolio = self.broker.snapshot(self._current_prices())
+            self._record_multi_execution(
+                self.day_index,
+                {
+                    "attempted_orders": len(fills),
+                    "filled_orders": sum(1 for fill in fills if not fill.blocked and fill.shares > 0),
+                    "blocked_orders": sum(1 for fill in fills if fill.blocked),
+                },
+            )
             self.trace = (
                 graph_result.trace
                 + [{"tool": "broker.execute", "detail": f"fills={len(fills)}, targets={self.last_target_positions}"}]
@@ -272,7 +285,14 @@ class TradingBacktestEngine:
         self.day_index += 1
         return self.to_dict()
 
-    def _record_multi_outcome(self, day: int, active_return: float) -> None:
+    def _record_multi_outcome(
+        self,
+        day: int,
+        active_return: float,
+        *,
+        outcome_day: int | None = None,
+        holding_days: int | None = None,
+    ) -> None:
         """Use the default graph's memory hook without requiring it from injected graphs.
 
         Multi-symbol outcome recording predates the graph service contract and
@@ -283,7 +303,28 @@ class TradingBacktestEngine:
         memory = getattr(self.graph, "memory", None)
         record_outcome = getattr(memory, "record_outcome", None)
         if callable(record_outcome):
-            record_outcome(day, active_return)
+            try:
+                record_outcome(
+                    day,
+                    active_return,
+                    outcome_day=outcome_day,
+                    holding_days=holding_days,
+                )
+            except TypeError:
+                # Keep graph doubles and third-party graph implementations
+                # that only expose the legacy two-argument hook compatible.
+                record_outcome(day, active_return)
+
+    def _record_multi_execution(self, day: int, execution: Dict[str, int]) -> None:
+        """Persist execution trace when the concrete graph exposes memory.
+
+        ``GraphRunner`` deliberately has no memory requirement, so injected
+        graph implementations can omit this optional learning capability.
+        """
+        memory = getattr(self.graph, "memory", None)
+        record_execution = getattr(memory, "record_execution", None)
+        if callable(record_execution):
+            record_execution(day, execution)
 
     def _current_prices(self) -> Dict[str, float]:
         prices: Dict[str, float] = {}
@@ -623,6 +664,7 @@ class TradingBacktestEngine:
             "outperforming": active_return >= 0,
             "sharpe": round(sharpe, 4),
             "win_rate": round(win_rate, 6),
+            "turnover": round(snapshot.turnover, 4),
             "blocked_orders": self.blocked_orders,
             "trade_count": len([trade for trade in self.trades if trade.side.value != "hold"]),
             "finished": self.finished,
