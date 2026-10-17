@@ -234,6 +234,9 @@ class BacktestConfig(BaseModel):
     top_n_sectors: int = 3
     stocks_per_sector: int = 3
     rebalance_frequency: int = 5
+    # ``0`` retains the signal/LLM weights; ``1`` uses pure
+    # inverse-volatility risk budgeting.
+    risk_parity_strength: float = Field(default=0.65, ge=0.0, le=1.0)
     # Optional synthetic dataset length (used by synthetic/csv providers when set)
     days: Optional[int] = None
 

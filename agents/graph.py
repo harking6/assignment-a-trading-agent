@@ -206,6 +206,7 @@ class TradingAgentsGraph:
             "kline_features": {},
             "sentiment": {},
             "memory_lesson": "",
+            "recall_audit": {},
             "trace": [
                 {
                     "tool": "multi_agent_runtime",
@@ -679,10 +680,16 @@ class TradingAgentsGraph:
         market_view = (state.get("market_snapshot") or {}).get("market_view", "neutral")
         recalled: list = []
         lesson = ""
+        recall_audit: Dict[str, Any] = {
+            "eligible": 0,
+            "future_outcomes_rejected": 0,
+            "malformed_outcomes_rejected": 0,
+        }
         # Ablation: ABLATE_EXPERIENCE=1 suppresses experience injection so the
         # LLM decides without any recalled historical outcomes.
         if not os.environ.get("ABLATE_EXPERIENCE"):
             try:
+                recall_audit = self.memory.recall_temporal_audit(int(state.get("day", 0)))
                 recalled = self.memory.recall_similar(
                     kline_features,
                     market_view,
@@ -715,6 +722,7 @@ class TradingAgentsGraph:
         state["kline_features"] = kline_features
         state["sentiment"] = sentiment
         state["memory_lesson"] = lesson
+        state["recall_audit"] = recall_audit
         state["trace"].append(
             {
                 "tool": "universe_node",
@@ -843,6 +851,7 @@ class TradingAgentsGraph:
         portfolio = state["portfolio"]
         sector_view = state.get("sector_view") or {}
         sector_view["llm_trace"] = self.top_down._build_llm_trace()
+        sector_view["recall_audit"] = dict(state.get("recall_audit") or {})
         targets = self.top_down._allocate(portfolio, selected, sector_view)
         state["sector_view"] = sector_view
         state["target_positions"] = targets
