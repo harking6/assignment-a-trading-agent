@@ -272,14 +272,24 @@ class TopDownSelector:
             if ma in frame.columns:
                 frame[f"dist_{ma}"] = ((frame["close"] - frame[ma]) / frame["close"]).replace([np.inf, -np.inf], 0.0).fillna(0.0)
 
-        # Multi-factor score for rule-based fallback
-        frame["momentum_score"] = self._zscore(frame["change_pct"]).fillna(0.0)
+        # Robust multi-horizon factor model. A single one-day move is noisy
+        # and ordinary Z-scores are distorted by an outlier in a small sector.
+        # Median/MAD scaling keeps the cross-sectional ranking stable while
+        # combining tactical (1d) and persistent (5d/20d) momentum.
+        momentum_raw = (
+            0.15 * frame["change_pct"]
+            + 0.35 * frame["return_5d"].fillna(frame["change_pct"])
+            + 0.50 * frame["return_20d"].fillna(frame["return_5d"]).fillna(frame["change_pct"])
+        )
+        frame["momentum_score"] = self._robust_zscore(momentum_raw).fillna(0.0)
         frame["liquidity_score"] = self._zscore(np.log1p(frame["volume"].astype(float))).fillna(0.0)
         vol = frame["volatility_20"].fillna(frame["volatility_20"].median())
-        frame["volatility_score"] = -self._zscore(vol).fillna(0.0)
+        if vol.isna().all():
+            vol = pd.Series(0.20, index=frame.index)
+        frame["volatility_score"] = -self._robust_zscore(vol).fillna(0.0)
         trend = (frame.get("dist_sma_20", pd.Series(0.0, index=frame.index)).fillna(0.0)
                  + frame.get("dist_sma_60", pd.Series(0.0, index=frame.index)).fillna(0.0))
-        frame["trend_score"] = self._zscore(trend).fillna(0.0)
+        frame["trend_score"] = self._robust_zscore(trend).fillna(0.0)
 
         # Relative strength = momentum + trend, the liquidity-free backbone of
         # both sector and stock selection. Liquidity is still scored (the LLM
@@ -293,7 +303,8 @@ class TopDownSelector:
         frame["sector_momentum_rank"] = frame.groupby("sector")["relative_strength"].rank(ascending=False, method="first")
 
         # Composite factor score for LLM context / tie-breaking. Liquidity is
-        # intentionally zero-weighted in the decision.
+        # intentionally zero-weighted in the decision: it remains a filter,
+        # not an alpha claim. The component fields stay visible for review.
         frame["factor_score"] = (
             0.45 * frame["momentum_score"]
             + 0.35 * frame["trend_score"]
@@ -309,6 +320,19 @@ class TopDownSelector:
         if std is None or math.isclose(std, 0.0):
             return pd.Series(0.0, index=series.index)
         return (series - mean) / std
+
+    @staticmethod
+    def _robust_zscore(series: pd.Series, clip: float = 3.5) -> pd.Series:
+        """Median/MAD cross-sectional standardization with bounded influence."""
+        numeric = pd.to_numeric(series, errors="coerce")
+        median = numeric.median()
+        mad = (numeric - median).abs().median()
+        scale = 1.4826 * float(mad) if pd.notna(mad) else 0.0
+        if not math.isfinite(scale) or math.isclose(scale, 0.0):
+            result = TopDownSelector._zscore(numeric)
+        else:
+            result = (numeric - median) / scale
+        return result.clip(lower=-abs(clip), upper=abs(clip))
 
     @staticmethod
     def _clean_float(value: Any) -> Any:
@@ -499,7 +523,8 @@ class TopDownSelector:
             (
                 "Construct advisory weights for the ranked candidates. Return JSON with weights as a "
                 "symbol-to-number object, cash_ratio, and reasoning. Use only allowed symbols; non-cash "
-                "weights must be non-negative and sum to at most 1. Hard limits are enforced later.\n"
+                "weights must be non-negative and sum to at most 1. Hard limits are enforced later. "
+                "No trade is valid: when evidence is insufficient, return empty weights and cash_ratio=1.\n"
                 f"Allowed symbols: {symbols}\nDebate: {debate}\nSector view: {sector_view}\n"
                 f"Portfolio: {portfolio.model_dump(mode='json')}\n"
                 f"Constraints: max_positions={self.config.max_positions}, "
@@ -512,6 +537,13 @@ class TopDownSelector:
         raw = result.get("weights") if isinstance(result.get("weights"), dict) else {}
         weights = {s: max(0.0, float(raw.get(s, 0.0))) for s in symbols}
         result["weights"] = weights
+        try:
+            cash_ratio = float(result.get("cash_ratio", 0.0))
+        except (TypeError, ValueError):
+            cash_ratio = 0.0
+        # An explicit all-cash response is a calibrated abstention, not a
+        # malformed allocation that should silently fall back to full risk.
+        result["abstain"] = cash_ratio >= 0.999 and not any(weights.values())
         return result
 
     def apply_portfolio_plan(self, selected: pd.DataFrame | None, plan: Dict[str, Any]) -> pd.DataFrame:
@@ -519,6 +551,8 @@ class TopDownSelector:
         if selected is None or selected.empty:
             return pd.DataFrame() if selected is None else selected
         frame = selected.copy()
+        if bool(plan.get("abstain")):
+            return frame.iloc[0:0].copy()
         weights = plan.get("weights") if isinstance(plan.get("weights"), dict) else {}
         if weights and sum(max(0.0, float(v)) for v in weights.values()) > 0:
             frame["target_weight"] = frame["symbol"].astype(str).map(
@@ -526,7 +560,7 @@ class TopDownSelector:
             )
             frame = frame[frame["target_weight"] > 0].sort_values("target_weight", ascending=False).reset_index(drop=True)
             frame["allocation_reasoning"] = str(plan.get("reasoning", "LLM portfolio manager"))
-        return frame
+        return self._apply_risk_budget(frame)
 
     def _select_sectors(
         self,
@@ -625,7 +659,7 @@ class TopDownSelector:
                 selected["llm_rationale"] = selected["symbol"].map(rationales).fillna("")
                 selected = selected.sort_values("target_weight", ascending=False)
                 selected["allocation_reasoning"] = allocation_reasoning or "由 LLM 分配权重"
-                return selected
+                return self._apply_risk_budget(selected)
 
         # Rule-based fallback: relative strength (momentum + trend) → softmax
         # weights. Liquidity is no longer in the weighting — it only gates the
@@ -636,7 +670,7 @@ class TopDownSelector:
         selected["allocation_reasoning"] = (
             "离线规则：板块按相对基准强度排序，个股按相对强度（动量+趋势）分配权重。"
         )
-        return selected
+        return self._apply_risk_budget(selected)
 
     @staticmethod
     def _softmax_weights(scores: np.ndarray) -> np.ndarray:
@@ -652,6 +686,59 @@ class TopDownSelector:
             return np.ones_like(scores) / len(scores)
         return exp_scores / total
 
+    def _apply_risk_budget(self, selected: pd.DataFrame) -> pd.DataFrame:
+        """Blend alpha weights with inverse-volatility risk budgeting.
+
+        Selection stays driven by the factor/LLM signal. This step prevents a
+        high-volatility winner from silently dominating the portfolio. The
+        blend is tunable for walk-forward ablations: 0 keeps signal weights,
+        1 uses pure inverse-volatility weights.
+        """
+        if selected is None or selected.empty:
+            return pd.DataFrame() if selected is None else selected
+        frame = selected.copy()
+        base = pd.to_numeric(frame.get("target_weight"), errors="coerce").fillna(0.0).clip(lower=0.0)
+        if float(base.sum()) <= 0:
+            base = pd.Series(1.0 / len(frame), index=frame.index)
+        else:
+            base = base / float(base.sum())
+
+        volatility = pd.to_numeric(frame.get("volatility_20"), errors="coerce")
+        fallback = float(volatility[volatility > 0].median()) if (volatility > 0).any() else 0.20
+        volatility = volatility.where(volatility > 0, fallback).fillna(fallback).clip(lower=0.01, upper=1.00)
+        inverse_volatility = 1.0 / volatility
+        risk_parity = inverse_volatility / float(inverse_volatility.sum())
+
+        strength = float(self.config.risk_parity_strength)
+        final = (1.0 - strength) * base + strength * risk_parity
+        final = final / float(final.sum())
+        contribution_raw = final * volatility
+        contribution = contribution_raw / float(contribution_raw.sum())
+
+        frame["signal_weight"] = base
+        frame["risk_parity_weight"] = risk_parity
+        frame["risk_adjusted_weight"] = final
+        frame["risk_contribution"] = contribution
+        frame["allocation_volatility"] = volatility
+        return frame
+
+    def _risk_budget_summary(self, selected: pd.DataFrame) -> Dict[str, Any]:
+        """Return JSON-safe risk-budget diagnostics for the UI and reports."""
+        if selected is None or selected.empty:
+            return {"method": "signal_inverse_volatility", "positions": 0}
+        weights = pd.to_numeric(selected.get("risk_adjusted_weight"), errors="coerce").fillna(0.0)
+        volatility = pd.to_numeric(selected.get("allocation_volatility"), errors="coerce").fillna(0.0)
+        concentration = float((weights * weights).sum())
+        return {
+            "method": "signal_inverse_volatility",
+            "risk_parity_strength": round(float(self.config.risk_parity_strength), 4),
+            "positions": int(len(selected)),
+            "effective_positions": round(1.0 / concentration, 3) if concentration > 0 else 0.0,
+            "volatility_proxy": round(float(np.sqrt(np.square(weights * volatility).sum())), 6),
+            "weights": {str(row["symbol"]): round(float(row["risk_adjusted_weight"]), 6) for _, row in selected.iterrows()},
+            "risk_contributions": {str(row["symbol"]): round(float(row["risk_contribution"]), 6) for _, row in selected.iterrows()},
+        }
+
     def _allocate(
         self,
         portfolio: PortfolioSnapshot,
@@ -664,10 +751,15 @@ class TopDownSelector:
         max_positions = max(1, self.config.max_positions)
         selected = selected.head(max_positions)
 
-        total_weight = selected["target_weight"].sum()
+        if "risk_adjusted_weight" not in selected.columns:
+            selected = self._apply_risk_budget(selected)
+        weight_column = "risk_adjusted_weight"
+        total_weight = selected[weight_column].sum()
         if total_weight <= 0:
-            selected["target_weight"] = 1.0 / len(selected)
-            total_weight = selected["target_weight"].sum()
+            selected[weight_column] = 1.0 / len(selected)
+            total_weight = selected[weight_column].sum()
+
+        sector_view["risk_budget"] = self._risk_budget_summary(selected)
 
         # Trend-aware cash reserve: raise cash in bearish/neutral down-markets to protect
         # relative performance, deploy more in bullish markets.
@@ -691,7 +783,7 @@ class TopDownSelector:
             price = float(row["close"])
             if price <= 0:
                 continue
-            weight = float(row["target_weight"]) / total_weight
+            weight = float(row[weight_column]) / total_weight
             target_value = min(investable * weight, max_position_value)
             target_shares = int(target_value // price)
             target_shares = round_order_shares(target_shares, self.config, OrderSide.buy)
@@ -860,8 +952,16 @@ class TopDownSelector:
                     "name": str(row.get("name", "")),
                     "sector": str(row.get("sector", "")),
                     "weight": self._clean_float(round(float(row.get("target_weight", 0.0)), 6)) or 0.0,
+                    "risk_adjusted_weight": self._clean_float(round(float(row.get("risk_adjusted_weight", row.get("target_weight", 0.0))), 6)) or 0.0,
+                    "risk_contribution": self._clean_float(round(float(row.get("risk_contribution", 0.0)), 6)) or 0.0,
+                    "volatility": self._clean_float(round(float(row.get("allocation_volatility", row.get("volatility_20", 0.0))), 6)) or 0.0,
                     "rationale": str(row.get("llm_rationale", "")),
                     "factor_score": self._clean_float(round(float(row.get("factor_score", 0.0)), 4)) or 0.0,
+                    "factor_components": {
+                        "momentum": self._clean_float(round(float(row.get("momentum_score", 0.0)), 4)) or 0.0,
+                        "trend": self._clean_float(round(float(row.get("trend_score", 0.0)), 4)) or 0.0,
+                        "low_volatility": self._clean_float(round(float(row.get("volatility_score", 0.0)), 4)) or 0.0,
+                    },
                 }
             )
         return rows

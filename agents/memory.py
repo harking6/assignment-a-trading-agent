@@ -277,6 +277,32 @@ class TradingMemory:
         scored.sort(key=lambda item: (-item[0], -item[1]))
         return [row for _, _, row in scored[: max(0, limit)]]
 
+    def recall_temporal_audit(self, current_day: int) -> Dict[str, int]:
+        """Summarize temporal exclusions without exposing recalled outcomes.
+
+        This is intentionally separate from ranking: reports can show that the
+        look-ahead guard ran, while the LLM still receives only eligible data.
+        """
+        eligible = future = malformed = 0
+        for row in self._read_all():
+            if row.get("scope") != "multi" or not _is_finite_number(row.get("active_return")):
+                continue
+            outcome_day = row.get("outcome_day")
+            try:
+                if outcome_day is None:
+                    malformed += 1
+                elif int(outcome_day) >= int(current_day):
+                    future += 1
+                else:
+                    eligible += 1
+            except (TypeError, ValueError):
+                malformed += 1
+        return {
+            "eligible": eligible,
+            "future_outcomes_rejected": future,
+            "malformed_outcomes_rejected": malformed,
+        }
+
     @staticmethod
     def effective_sample_size(records: List[Dict[str, Any]]) -> float:
         """Return the concentration-adjusted count of recalled experience."""

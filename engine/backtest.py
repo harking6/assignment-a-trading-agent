@@ -17,6 +17,7 @@ from data.universe_service import (
 )
 from engine.rebalance import plan_rebalance_orders
 from tools.broker import SimulatedBroker
+from tools.financial_llm_bias_audit import FinancialLLMBiasAuditor
 from tools.indicators import enrich_indicators
 
 
@@ -120,6 +121,10 @@ class TradingBacktestEngine:
         self.blocked_orders = 0
         self.last_target_positions: Dict[str, int] = {}
         self.last_sector_view: Dict[str, Any] = {}
+        self.bias_auditor = FinancialLLMBiasAuditor()
+        self.last_bias_audit: Dict[str, Any] = {}
+        self.llm_call_count = 0
+        self.llm_latency_seconds = 0.0
         # Last multi-symbol rebalance anchor (day/equity/benchmark close) used
         # to back-fill the realized active return onto the prior decision in
         # the experience memory at the next rebalance.
@@ -226,6 +231,14 @@ class TradingBacktestEngine:
             target_positions = graph_result.target_positions
             self.last_sector_view = sector_view
             self.last_target_positions = target_positions
+            self._record_llm_costs(sector_view)
+            bias_audit = self.bias_auditor.record_rebalance(
+                day=self.day_index,
+                sector_view=sector_view,
+                target_positions=target_positions,
+                recall=sector_view.get("recall_audit"),
+            )
+            self.last_bias_audit = bias_audit
             # Anchor for the next rebalance's active-return back-fill. The
             # ``day`` key mirrors the 0-indexed day_index the memory record is
             # written with (run_multi writes state["day"] = day_index), so
@@ -558,6 +571,9 @@ class TradingBacktestEngine:
             "realized_pnl": round(snapshot.realized_pnl, 4),
             "total_fees": round(snapshot.total_fees, 4),
             "turnover": round(snapshot.turnover, 4),
+            "total_fees": round(snapshot.total_fees, 4),
+            "llm_call_count": self.llm_call_count,
+            "llm_latency_seconds": round(self.llm_latency_seconds, 4),
             "total_return": round(total_return, 6),
             "symbol_buy_hold_return": round(symbol_return, 6),
             "benchmark_return": round(benchmark["return"], 6),
@@ -673,7 +689,34 @@ class TradingBacktestEngine:
                 if self.active_universe_snapshot is not None
                 else None
             ),
+            "bias_audit": self.bias_auditor.summary(
+                config=self.config,
+                universe_snapshot=(
+                    self.active_universe_snapshot.summary()
+                    if self.active_universe_snapshot is not None
+                    else None
+                ),
+                total_fees=snapshot.total_fees,
+                turnover=snapshot.turnover,
+                llm_call_count=self.llm_call_count,
+                llm_latency_seconds=self.llm_latency_seconds,
+            ),
         }
+
+    def _record_llm_costs(self, sector_view: Dict[str, Any]) -> None:
+        """Accumulate model invocation time from the graph's per-rebalance trace."""
+        trace = sector_view.get("llm_trace") or {}
+        calls = trace.get("calls") if isinstance(trace, dict) else []
+        if not isinstance(calls, list):
+            return
+        self.llm_call_count += len(calls)
+        for call in calls:
+            if not isinstance(call, dict):
+                continue
+            try:
+                self.llm_latency_seconds += max(0.0, float(call.get("elapsed_seconds", 0.0)))
+            except (TypeError, ValueError):
+                continue
 
     def symbol_buy_hold_return(self, price: float) -> float:
         return price / self.bars[0].close - 1.0 if self.bars and self.bars[0].close else 0.0
@@ -771,6 +814,7 @@ class TradingBacktestEngine:
             "research_log": self.research_log[-20:],
             "report": self.report(),
             "sector_view": self.last_sector_view,
+            "bias_audit": self.last_bias_audit,
             "universe_snapshot": (
                 self.active_universe_snapshot.summary()
                 if self.active_universe_snapshot is not None

@@ -52,3 +52,4 @@ class TradingGraphState(TypedDict, total=False):
     kline_features: Dict[str, Any]
     sentiment: Dict[str, Any]
     memory_lesson: str
+    recall_audit: Dict[str, Any]
